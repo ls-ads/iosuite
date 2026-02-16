@@ -1,0 +1,31 @@
+# Binaries
+bin/
+tools/ioimg/ioimg
+libs/iocore/bridge/bridge
+
+# Go
+go.work.sum
+vendor/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Environment Variables
+.env
+.env.local
+
+# OS specifics
+.DS_Store
+Thumbs.db

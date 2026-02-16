@@ -1,0 +1,10 @@
+{
+  "name": "iosuite",
+  "version": "0.1.0",
+  "description": "Node.js bindings for iosuite",
+  "main": "index.js",
+  "dependencies": {
+    "ffi-napi": "^4.0.3",
+    "ref-napi": "^3.0.3"
+  }
+}
