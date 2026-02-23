@@ -9,8 +9,8 @@ var Logger *slog.Logger
 
 func init() {
 	// Initialize a high-performance slog logger with JSON output for structured logging.
-	Logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+	Logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
 	}))
 }
 

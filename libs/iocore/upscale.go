@@ -25,15 +25,23 @@ const (
 
 const (
 	// Opinionated names for auto-provisioning
-	RunPodIOImgEndpointName = "ioimg-upscale-real-esrgan"
+	RunPodIOImgEndpointName = "ioimg-real-esrgan"
 )
+
+// RunPodStatusUpdate provides progress information during RunPod job execution.
+type RunPodStatusUpdate struct {
+	Phase   string        // "infrastructure", "queued", "in_progress", "completed"
+	Message string        // Human-readable status message
+	Elapsed time.Duration // Time elapsed since job submission
+}
 
 // UpscaleConfig holds configuration for the upscaler.
 type UpscaleConfig struct {
-	Provider UpscaleProvider
-	APIKey   string
-	Model    string // Model name (e.g., "real-esrgan")
-	Scale    int    // e.g., 2, 4
+	Provider       UpscaleProvider
+	APIKey         string
+	Model          string                   // Model name (e.g., "real-esrgan")
+	Scale          int                      // e.g., 2, 4
+	StatusCallback func(RunPodStatusUpdate) // Optional callback for progress updates
 }
 
 // Upscaler is the interface for image upscaling operations.
@@ -206,83 +214,107 @@ type runpodJobResponse struct {
 	Status        string `json:"status"`
 	ExecutionTime int64  `json:"executionTime"` // in milliseconds
 	Output        struct {
-		Status string `json:"status"` // Optional
-		Image  string `json:"image"`
+		Status      string `json:"status"` // Optional
+		ImageBase64 string `json:"image_base64"`
 	} `json:"output"`
 	Error string `json:"error"`
 }
 
-type runpodGraphQLRequest struct {
-	Query     string                 `json:"query"`
-	Variables map[string]interface{} `json:"variables"`
-}
-
-type runpodGraphQLResponse struct {
-	Data   json.RawMessage `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
-}
-
 func (u *runpodUpscaler) ensureRunPodEndpoint(ctx context.Context, key string) (string, error) {
-	// 1. Check if endpoint exists
-	listEndpointsQuery := `query { myself { endpoints { id name } } }`
-	respBody, err := u.runGraphQL(ctx, key, listEndpointsQuery, nil)
+	// 1. Check if endpoint exists via REST API
+	listURL := "https://rest.runpod.io/v1/endpoints"
+	listReq, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create list endpoints request: %v", err)
 	}
-
-	var endpointsData struct {
-		Myself struct {
-			Endpoints []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"endpoints"`
-		} `json:"myself"`
-	}
-
-	if err := json.Unmarshal(respBody, &endpointsData); err == nil {
-		for _, e := range endpointsData.Myself.Endpoints {
-			if strings.HasPrefix(e.Name, RunPodIOImgEndpointName) {
-				Info("Using existing RunPod endpoint", "id", e.ID, "matched_name", e.Name)
-				return e.ID, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("RunPod endpoint '%s' not found. Please create a serverless endpoint with this name in the RunPod Dashboard.", RunPodIOImgEndpointName)
-}
-
-func (u *runpodUpscaler) runGraphQL(ctx context.Context, key, query string, vars map[string]interface{}) (json.RawMessage, error) {
-	reqBody := runpodGraphQLRequest{
-		Query:     query,
-		Variables: vars,
-	}
-	jsonData, _ := json.Marshal(reqBody)
-	url := "https://api.runpod.io/graphql?api_key=" + key
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
-	req.Header.Set("Content-Type", "application/json")
+	listReq.Header.Set("Authorization", "Bearer "+key)
 
 	client := &http.Client{}
+	listResp, err := client.Do(listReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to list RunPod endpoints: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode == http.StatusOK {
+		var endpoints []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(listResp.Body).Decode(&endpoints); err == nil {
+			for _, e := range endpoints {
+				if strings.HasPrefix(e.Name, RunPodIOImgEndpointName) {
+					Debug("Using existing RunPod endpoint", "id", e.ID, "matched_name", e.Name)
+					return e.ID, nil
+				}
+			}
+		}
+	} else {
+		body, _ := io.ReadAll(listResp.Body)
+		Debug("Failed to list RunPod endpoints", "status", listResp.StatusCode, "body", string(body))
+	}
+
+	Debug("RunPod endpoint not found, creating", "name", RunPodIOImgEndpointName)
+
+	createURL := "https://rest.runpod.io/v1/endpoints"
+	reqBody := map[string]interface{}{
+		"name":        RunPodIOImgEndpointName,
+		"templateId":  "047z8w5i69",
+		"gpuTypeIds":  []string{"NVIDIA RTX A4000"}, // 16GB tier
+		"workersMin":  0,
+		"workersMax":  1,
+		"idleTimeout": 5,
+		"flashboot":   true,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal create endpoint request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", createURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for RunPod endpoint creation: %v", err)
+	}
+	// RunPod REST API uses Bearer authentication
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("failed to perform RunPod endpoint creation request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	var gqlResp runpodGraphQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("RunPod API returned status %d when creating endpoint: %s", resp.StatusCode, string(body))
 	}
 
-	if len(gqlResp.Errors) > 0 {
-		return nil, fmt.Errorf("runpod graphql error: %s", gqlResp.Errors[0].Message)
+	var createData struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
 	}
-	return gqlResp.Data, nil
+
+	if err := json.NewDecoder(resp.Body).Decode(&createData); err != nil {
+		return "", fmt.Errorf("failed to parse RunPod endpoint creation response: %v", err)
+	}
+
+	Debug("Created new RunPod endpoint", "id", createData.ID, "name", createData.Name)
+	return createData.ID, nil
+}
+
+func (u *runpodUpscaler) emitStatus(phase, message string, elapsed time.Duration) {
+	if u.config.StatusCallback != nil {
+		u.config.StatusCallback(RunPodStatusUpdate{
+			Phase:   phase,
+			Message: message,
+			Elapsed: elapsed,
+		})
+	}
 }
 
 func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
-	Info("Preparing RunPod infrastructure", "model", u.config.Model)
 	key := u.config.APIKey
 	if key == "" {
 		key = os.Getenv("RUNPOD_API_KEY")
@@ -291,19 +323,16 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		return 0, fmt.Errorf("runpod API key is required (set via -k or RUNPOD_API_KEY)")
 	}
 
+	u.emitStatus("infrastructure", "Connecting to RunPod...", 0)
+
 	endpointID, err := u.ensureRunPodEndpoint(ctx, key)
 	if err != nil {
 		return 0, fmt.Errorf("failed to ensure runpod infrastructure: %v", err)
 	}
 
-	var modelName string
 	switch u.config.Model {
 	case "real-esrgan", "":
-		if u.config.Scale == 2 {
-			modelName = "RealESRGAN_x2plus"
-		} else {
-			modelName = "RealESRGAN_x4plus"
-		}
+		// Only x4plus is supported currently by the underlying container
 	default:
 		return 0, fmt.Errorf("model not supported: %s", u.config.Model)
 	}
@@ -316,10 +345,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 
 	reqBody := runpodJobRequest{
 		Input: map[string]interface{}{
-			"source_image": base64.StdEncoding.EncodeToString(buf.Bytes()),
-			"model":        modelName,
-			"scale":        u.config.Scale,
-			"face_enhance": true,
+			"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
 		},
 	}
 
@@ -327,10 +353,11 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	if err != nil {
 		return 0, err
 	}
-	Info("Sending RunPod request", "payload_prefix", string(jsonData)[:100])
 
-	url := fmt.Sprintf("https://api.runpod.ai/v2/%s/runsync?wait=90000", endpointID)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	// 2. Submit async job via /run
+	u.emitStatus("queued", "Submitting job...", 0)
+	runURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/run", endpointID)
+	req, err := http.NewRequestWithContext(ctx, "POST", runURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return 0, err
 	}
@@ -350,24 +377,96 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return 0, fmt.Errorf("runpod job failed with status %s: %s", resp.Status, string(body))
+		return 0, fmt.Errorf("runpod job submission failed with status %s: %s", resp.Status, string(body))
 	}
+
+	var runResp runpodJobResponse
+	if err := json.Unmarshal(body, &runResp); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal runpod run response: %v, body: %s", err, string(body))
+	}
+
+	if runResp.ID == "" {
+		return 0, fmt.Errorf("runpod returned empty job ID")
+	}
+
+	// 3. Poll /status/{jobId} until COMPLETED or FAILED
+	const (
+		pollInterval = 3 * time.Second
+		maxWait      = 5 * time.Minute
+	)
+	statusURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/status/%s", endpointID, runResp.ID)
+	pollStart := time.Now()
+
+	u.emitStatus("queued", "Waiting for GPU worker...", 0)
 
 	var job runpodJobResponse
-	if err := json.Unmarshal(body, &job); err != nil {
-		return 0, fmt.Errorf("failed to unmarshal runpod response: %v, body: %s", err, string(body))
+	for {
+		elapsed := time.Since(pollStart)
+		if elapsed > maxWait {
+			return 0, fmt.Errorf("runpod job %s timed out after %s (last status: %s)", runResp.ID, maxWait, job.Status)
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+
+		statusReq, err := http.NewRequestWithContext(ctx, "GET", statusURL, nil)
+		if err != nil {
+			return 0, err
+		}
+		statusReq.Header.Set("Authorization", "Bearer "+key)
+
+		statusResp, err := client.Do(statusReq)
+		if err != nil {
+			Debug("poll error, retrying", "error", err)
+			continue
+		}
+
+		statusBody, err := io.ReadAll(statusResp.Body)
+		statusResp.Body.Close()
+		if err != nil {
+			Debug("poll read error, retrying", "error", err)
+			continue
+		}
+
+		if statusResp.StatusCode != http.StatusOK {
+			Debug("poll non-200, retrying", "status", statusResp.StatusCode)
+			continue
+		}
+
+		if err := json.Unmarshal(statusBody, &job); err != nil {
+			Debug("poll unmarshal error, retrying", "error", err)
+			continue
+		}
+
+		switch job.Status {
+		case "COMPLETED":
+			u.emitStatus("completed", "Processing complete", elapsed)
+		case "FAILED":
+			return 0, fmt.Errorf("runpod job failed: %s", job.Error)
+		case "IN_PROGRESS":
+			u.emitStatus("in_progress", "Processing on GPU...", elapsed)
+			continue
+		case "IN_QUEUE":
+			u.emitStatus("queued", "Waiting for GPU worker (cold start)...", elapsed)
+			continue
+		default:
+			u.emitStatus("queued", fmt.Sprintf("Status: %s", job.Status), elapsed)
+			continue
+		}
+
+		// If we get here, status is COMPLETED
+		break
 	}
 
-	if job.Status != "COMPLETED" {
-		return 0, fmt.Errorf("runpod job %s: %s", job.Status, job.Error)
-	}
-
-	// 3. Decode base64 image from output
-	if job.Output.Image == "" {
+	// 4. Decode base64 image from output
+	if job.Output.ImageBase64 == "" {
 		return 0, fmt.Errorf("runpod worker returned no image in output (status: %s)", job.Output.Status)
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(job.Output.Image)
+	decoded, err := base64.StdEncoding.DecodeString(job.Output.ImageBase64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to decode output image: %v", err)
 	}

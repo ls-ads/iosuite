@@ -58,12 +58,7 @@ var upscaleCmd = &cobra.Command{
 			Model:    model,
 		}
 
-		upscaler, err := iocore.NewUpscaler(config)
-		if err != nil {
-			return err
-		}
-
-		return processPath(input, output, upscaler)
+		return processPath(input, output, &config)
 	},
 }
 
@@ -72,7 +67,7 @@ type upscaleJob struct {
 	dst string
 }
 
-func processPath(src, dst string, upscaler iocore.Upscaler) error {
+func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	var jobs []upscaleJob
 
 	info, err := os.Stat(src)
@@ -127,17 +122,43 @@ func processPath(src, dst string, upscaler iocore.Upscaler) error {
 	}
 	startAll := time.Now()
 
-	bar := progressbar.NewOptions(len(jobs),
-		progressbar.OptionSetDescription("Upscaling"),
-		progressbar.OptionSetWriter(os.Stderr),
-		progressbar.OptionShowCount(),
-		progressbar.OptionShowIts(),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stderr, "\n")
-		}),
-		progressbar.OptionSpinnerType(14),
-		progressbar.OptionFullWidth(),
-	)
+	useProgressBar := config.Provider != iocore.ProviderRunPod
+
+	var bar *progressbar.ProgressBar
+	if useProgressBar {
+		bar = progressbar.NewOptions(len(jobs),
+			progressbar.OptionSetDescription("Upscaling"),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSpinnerType(14),
+			progressbar.OptionFullWidth(),
+			progressbar.OptionClearOnFinish(),
+		)
+	}
+
+	// Wire up StatusCallback for RunPod progress updates BEFORE creating upscaler
+	if config.Provider == iocore.ProviderRunPod {
+		config.StatusCallback = func(update iocore.RunPodStatusUpdate) {
+			elapsed := ""
+			if update.Elapsed > 0 {
+				elapsed = fmt.Sprintf(" (%s)", update.Elapsed.Round(time.Second))
+			}
+			msg := fmt.Sprintf("[RunPod] %s%s", update.Message, elapsed)
+			// Overwrite the current line on stderr
+			fmt.Fprintf(os.Stderr, "\r%-60s", msg)
+			if update.Phase == "completed" {
+				// Clear the status line
+				fmt.Fprintf(os.Stderr, "\r%-60s\r", "")
+			}
+		}
+	}
+
+	// Create upscaler AFTER callback is set so it's captured in the config copy
+	upscaler, err := iocore.NewUpscaler(*config)
+	if err != nil {
+		return err
+	}
 
 	for _, job := range jobs {
 		currentFile := filepath.Base(job.src)
@@ -146,13 +167,14 @@ func processPath(src, dst string, upscaler iocore.Upscaler) error {
 			avgTime = time.Since(startAll) / time.Duration(len(metrics.Files))
 		}
 
-		descPrefix := "Upscaling"
-		if dryRun {
-			descPrefix = "[DRY-RUN] Estimating"
+		if useProgressBar {
+			descPrefix := "Upscaling"
+			if dryRun {
+				descPrefix = "[DRY-RUN] Estimating"
+			}
+			bar.Describe(fmt.Sprintf("%s [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
+				descPrefix, metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile))
 		}
-
-		bar.Describe(fmt.Sprintf("%s [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
-			descPrefix, metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile))
 
 		var inSize, outSize int64
 		var activeDuration, wallDuration time.Duration
@@ -190,7 +212,9 @@ func processPath(src, dst string, upscaler iocore.Upscaler) error {
 			metrics.TotalBilledTime += activeDuration
 		}
 		metrics.Files = append(metrics.Files, metric)
-		bar.Add(1)
+		if useProgressBar {
+			bar.Add(1)
+		}
 		if dryRun {
 			time.Sleep(50 * time.Millisecond) // Just to make the bar visible
 		}
