@@ -242,3 +242,69 @@ func PollRunPodJob(ctx context.Context, key, endpointID, jobID string, statusCal
 		}
 	}
 }
+
+// RunPodEndpoint represents a concise summary of a RunPod endpoint.
+type RunPodEndpoint struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// GetRunPodEndpoints gets all RunPod serverless endpoints that match the given name prefix.
+func GetRunPodEndpoints(ctx context.Context, key, namePrefix string) ([]RunPodEndpoint, error) {
+	listURL := "https://rest.runpod.io/v1/endpoints"
+	listReq, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create list endpoints request: %v", err)
+	}
+	listReq.Header.Set("Authorization", "Bearer "+key)
+
+	client := &http.Client{}
+	listResp, err := client.Do(listReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list RunPod endpoints: %v", err)
+	}
+	defer listResp.Body.Close()
+
+	if listResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listResp.Body)
+		return nil, fmt.Errorf("RunPod API returned status %d when listing endpoints: %s", listResp.StatusCode, string(body))
+	}
+
+	var allEndpoints []RunPodEndpoint
+	if err := json.NewDecoder(listResp.Body).Decode(&allEndpoints); err != nil {
+		return nil, fmt.Errorf("failed to parse endpoints list: %v", err)
+	}
+
+	var matched []RunPodEndpoint
+	for _, e := range allEndpoints {
+		if strings.HasPrefix(e.Name, namePrefix) {
+			matched = append(matched, e)
+		}
+	}
+
+	return matched, nil
+}
+
+// DeleteRunPodEndpoint deletes a specific RunPod serverless endpoint by ID.
+func DeleteRunPodEndpoint(ctx context.Context, key, id string) error {
+	deleteURL := fmt.Sprintf("https://rest.runpod.io/v1/endpoints/%s", id)
+	delReq, err := http.NewRequestWithContext(ctx, "DELETE", deleteURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request for endpoint: %v", err)
+	}
+	delReq.Header.Set("Authorization", "Bearer "+key)
+
+	client := &http.Client{}
+	delResp, err := client.Do(delReq)
+	if err != nil {
+		return fmt.Errorf("failed to delete endpoint: %v", err)
+	}
+	defer delResp.Body.Close()
+
+	if delResp.StatusCode != http.StatusOK && delResp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(delResp.Body)
+		return fmt.Errorf("failed to delete endpoint (bad status): %d, body: %s", delResp.StatusCode, string(body))
+	}
+
+	return nil
+}
