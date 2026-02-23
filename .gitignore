@@ -4,7 +4,6 @@ tools/ioimg/ioimg
 libs/iocore/bridge/bridge
 
 # Go
-go.work.sum
 vendor/
 
 # Node.js
