@@ -57,6 +57,10 @@ func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
 	case ProviderReplicate:
 		return &replicateUpscaler{config: config}, nil
 	case ProviderRunPod:
+		if config.Model != "real-esrgan" && config.Model != "" {
+			return nil, fmt.Errorf("model not supported: %s", config.Model)
+		}
+
 		key := config.APIKey
 		if key == "" {
 			key = os.Getenv("RUNPOD_API_KEY")
