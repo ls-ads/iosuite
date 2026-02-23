@@ -62,6 +62,48 @@ var upscaleCmd = &cobra.Command{
 	},
 }
 
+var upscaleInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Initialize and provision required infrastructure for the upscaler",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		provider := iocore.UpscaleProvider(upscaleProvider)
+
+		if provider != iocore.ProviderRunPod {
+			fmt.Printf("Initialization is not required for provider: %s\n", provider)
+			return nil
+		}
+
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("RUNPOD_API_KEY")
+		}
+		if key == "" {
+			return fmt.Errorf("api key is required for runpod init (set via -k or RUNPOD_API_KEY)")
+		}
+
+		ctx := context.Background()
+		fmt.Printf("Provisioning RunPod endpoint '%s'...\n", iocore.RunPodIOImgEndpointName)
+		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
+
+		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
+			Name:        iocore.RunPodIOImgEndpointName,
+			TemplateID:  "047z8w5i69",
+			GPUTypeIDs:  []string{"NVIDIA RTX A4000"}, // 16GB tier
+			WorkersMin:  0,
+			WorkersMax:  1,
+			IdleTimeout: 5,
+			Flashboot:   true,
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to provision runpod endpoint: %v", err)
+		}
+
+		fmt.Printf("Successfully initialized RunPod endpoint!\nEndpoint ID: %s\n", endpointID)
+		return nil
+	},
+}
+
 type upscaleJob struct {
 	src string
 	dst string
@@ -359,5 +401,9 @@ func init() {
 	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
 	upscaleCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Estimate time/cost without actually upscaling")
 
+	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
+	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
+
+	upscaleCmd.AddCommand(upscaleInitCmd)
 	rootCmd.AddCommand(upscaleCmd)
 }

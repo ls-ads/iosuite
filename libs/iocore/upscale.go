@@ -170,20 +170,17 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		return 0, fmt.Errorf("runpod API key is required (set via -k or RUNPOD_API_KEY)")
 	}
 
-	u.emitStatus("infrastructure", "Connecting to RunPod...", 0)
-
-	endpointID, err := EnsureRunPodEndpoint(ctx, key, RunPodEndpointConfig{
-		Name:        RunPodIOImgEndpointName,
-		TemplateID:  "047z8w5i69",
-		GPUTypeIDs:  []string{"NVIDIA RTX A4000"}, // 16GB tier
-		WorkersMin:  0,
-		WorkersMax:  1,
-		IdleTimeout: 5,
-		Flashboot:   true,
-	})
+	endpoints, err := GetRunPodEndpoints(ctx, key, RunPodIOImgEndpointName)
 	if err != nil {
-		return 0, fmt.Errorf("failed to ensure runpod infrastructure: %v", err)
+		return 0, fmt.Errorf("failed to search for runpod infrastructure: %v", err)
 	}
+
+	if len(endpoints) == 0 {
+		return 0, fmt.Errorf("no runpod endpoint found for '%s'. please run 'ioimg upscale init -p runpod' first", RunPodIOImgEndpointName)
+	}
+
+	endpointID := endpoints[0].ID
+	u.emitStatus("infrastructure", "Found existing RunPod endpoint", 0)
 
 	switch u.config.Model {
 	case "real-esrgan", "":
