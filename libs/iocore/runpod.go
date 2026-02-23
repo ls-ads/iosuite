@@ -42,10 +42,7 @@ func EnsureRunPodEndpoint(ctx context.Context, key string, config RunPodEndpoint
 	defer listResp.Body.Close()
 
 	if listResp.StatusCode == http.StatusOK {
-		var endpoints []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
+		var endpoints []RunPodEndpoint
 		if err := json.NewDecoder(listResp.Body).Decode(&endpoints); err == nil {
 			for _, e := range endpoints {
 				if strings.HasPrefix(e.Name, config.Name) {
@@ -86,10 +83,7 @@ func EnsureRunPodEndpoint(ctx context.Context, key string, config RunPodEndpoint
 		return "", fmt.Errorf("RunPod API returned status %d when creating endpoint: %s", resp.StatusCode, string(body))
 	}
 
-	var createData struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
+	var createData RunPodEndpoint
 
 	if err := json.NewDecoder(resp.Body).Decode(&createData); err != nil {
 		return "", fmt.Errorf("failed to parse RunPod endpoint creation response: %v", err)
