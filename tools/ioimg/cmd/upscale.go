@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ var (
 	upscaleProvider string
 	apiKey          string
 	model           string
+	jsonOutput      bool
 )
 
 type batchMetrics struct {
@@ -327,7 +329,47 @@ func upscaleFile(src, dst string, upscaler iocore.Upscaler) (int64, int64, time.
 }
 
 func displayMetrics(m *batchMetrics) {
-	fmt.Printf("\n\n--- Upscale Summary ---\n")
+	if jsonOutput {
+		avgTime := time.Duration(0)
+		avgCost := 0.0
+		if m.Success > 0 {
+			avgTime = m.TotalTime / time.Duration(m.TotalFiles)
+			avgCost = m.TotalCost / float64(m.TotalFiles)
+		}
+
+		files := []map[string]interface{}{}
+		for _, f := range m.Files {
+			entry := map[string]interface{}{
+				"name":     f.Name,
+				"duration": f.Duration.Round(time.Millisecond).String(),
+				"cost":     f.Cost,
+				"success":  f.Success,
+			}
+			if !f.Success {
+				entry["error"] = f.Error
+			}
+			files = append(files, entry)
+		}
+
+		result := map[string]interface{}{
+			"total_files":  m.TotalFiles,
+			"succeeded":    m.Success,
+			"failed":       m.Failure,
+			"total_time":   m.TotalTime.Round(time.Millisecond).String(),
+			"billed_time":  m.TotalBilledTime.Round(time.Millisecond).String(),
+			"avg_time_img": avgTime.Round(time.Millisecond).String(),
+			"total_cost":   m.TotalCost,
+			"avg_cost_img": avgCost,
+			"input_bytes":  m.InputBytes,
+			"output_bytes": m.OutputBytes,
+			"files":        files,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(result)
+		return
+	}
+
 	table := tablewriter.NewTable(os.Stdout,
 		tablewriter.WithHeader([]string{"Metric", "Value"}),
 	)
@@ -364,7 +406,6 @@ func displayMetrics(m *batchMetrics) {
 			}
 		}
 	}
-	fmt.Println()
 }
 
 func formatBytes(b int64) string {
@@ -393,6 +434,7 @@ func init() {
 	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
+	upscaleCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
