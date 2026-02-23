@@ -44,9 +44,9 @@ type UpscaleConfig struct {
 	StatusCallback func(RunPodStatusUpdate) // Optional callback for progress updates
 }
 
-// Upscaler is the interface for image upscaling operations.
 type Upscaler interface {
 	Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error)
+	Rate() float64
 }
 
 // NewUpscaler returns an Upscaler implementation based on the provided config.
@@ -87,7 +87,9 @@ func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
 			config.StatusCallback(RunPodStatusUpdate{Phase: "infrastructure", Message: "Found existing RunPod endpoint"})
 		}
 
-		return &runpodUpscaler{config: config, endpointID: endpoints[0].ID}, nil
+		rate := CalculateRunPodEndpointRate(endpoints[0].GPUTypeIDs, endpoints[0].WorkersMin)
+
+		return &runpodUpscaler{config: config, endpointID: endpoints[0].ID, rate: rate}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -98,6 +100,8 @@ func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
 type localUpscaler struct {
 	config UpscaleConfig
 }
+
+func (u *localUpscaler) Rate() float64 { return 0.0 }
 
 func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
 	Info("Upscaling locally", "model", u.config.Model)
@@ -124,6 +128,8 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 type replicateUpscaler struct {
 	config UpscaleConfig
 }
+
+func (u *replicateUpscaler) Rate() float64 { return 0.000225 }
 
 func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
 	Info("Upscaling via Replicate", "model", u.config.Model)
@@ -183,7 +189,10 @@ func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Write
 type runpodUpscaler struct {
 	config     UpscaleConfig
 	endpointID string
+	rate       float64
 }
+
+func (u *runpodUpscaler) Rate() float64 { return u.rate }
 
 func (u *runpodUpscaler) emitStatus(phase, message string, elapsed time.Duration) {
 	if u.config.StatusCallback != nil {

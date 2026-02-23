@@ -237,10 +237,75 @@ func PollRunPodJob(ctx context.Context, key, endpointID, jobID string, statusCal
 	}
 }
 
-// RunPodEndpoint represents a concise summary of a RunPod endpoint.
 type RunPodEndpoint struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	GPUTypeIDs []string `json:"gpuTypeIds"`
+	WorkersMin int      `json:"workersMin"`
+}
+
+// CalculateRunPodEndpointRate calculates the rate per second according to the endpoint's GPU and scaling profile.
+func CalculateRunPodEndpointRate(gpuTypeIds []string, workersMin int) float64 {
+	if len(gpuTypeIds) == 0 {
+		return 0.00019 // default fallback
+	}
+
+	// Normalize spaces in case of irregular options like "NVIDIA  RTX A4500"
+	gpuType := strings.Join(strings.Fields(gpuTypeIds[0]), " ")
+	isActive := workersMin > 0
+
+	switch gpuType {
+	case "NVIDIA B200":
+		if isActive {
+			return 0.00190
+		}
+		return 0.00240
+	case "NVIDIA H200", "NVIDIA H200 NVL":
+		if isActive {
+			return 0.00124
+		}
+		return 0.00155
+	case "NVIDIA H100 80GB HBM3", "NVIDIA H100 PCIe", "NVIDIA H100 NVL":
+		if isActive {
+			return 0.00093
+		}
+		return 0.00116
+	case "NVIDIA A100-SXM4-80GB", "NVIDIA A100 80GB PCIe":
+		if isActive {
+			return 0.00060
+		}
+		return 0.00076
+	case "NVIDIA L40", "NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation":
+		if isActive {
+			return 0.00037
+		}
+		return 0.00053
+	case "NVIDIA RTX A6000", "NVIDIA A40", "NVIDIA GeForce RTX 5090":
+		if isActive {
+			return 0.00031
+		}
+		return 0.00044
+	case "NVIDIA GeForce RTX 4090":
+		if isActive {
+			return 0.00021
+		}
+		return 0.00031
+	case "NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA A5000 Ada", "NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 3090 Ti":
+		if isActive {
+			return 0.00013
+		}
+		return 0.00019
+	case "NVIDIA RTX A4000", "NVIDIA RTX A4500", "NVIDIA RTX 4000 Ada Generation", "NVIDIA RTX 4000 SFF Ada Generation", "NVIDIA RTX 2000 Ada Generation", "NVIDIA RTX A2000":
+		if isActive {
+			return 0.00011
+		}
+		return 0.00016
+	default:
+		if isActive {
+			return 0.00013
+		}
+		return 0.00019
+	}
 }
 
 // GetRunPodEndpoints gets all RunPod serverless endpoints that match the given name prefix.

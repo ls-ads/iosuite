@@ -17,7 +17,6 @@ var (
 	upscaleProvider string
 	apiKey          string
 	model           string
-	dryRun          bool
 )
 
 type batchMetrics struct {
@@ -29,7 +28,6 @@ type batchMetrics struct {
 	TotalCost       float64
 	InputBytes      int64
 	OutputBytes     int64
-	IsDryRun        bool
 	Files           []fileMetric
 }
 
@@ -159,7 +157,6 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 
 	metrics := &batchMetrics{
 		TotalFiles: len(jobs),
-		IsDryRun:   dryRun,
 	}
 	startAll := time.Now()
 
@@ -197,12 +194,8 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		}
 
 		if config.Provider != iocore.ProviderRunPod {
-			descPrefix := "Upscaling"
-			if dryRun {
-				descPrefix = "[DRY-RUN] Estimating"
-			}
-			msg := fmt.Sprintf("%s [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
-				descPrefix, metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile)
+			msg := fmt.Sprintf("Upscaling [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
+				metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile)
 			fmt.Fprintf(os.Stderr, "\r%-80s", msg)
 		}
 
@@ -210,17 +203,9 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		var activeDuration, wallDuration time.Duration
 		var err error
 
-		if dryRun {
-			info, _ := os.Stat(job.src)
-			inSize = info.Size()
-			activeDuration = estimateDuration(upscaleProvider, inSize)
-			wallDuration = 100 * time.Millisecond // Dry run is fast
-			outSize = inSize * 16                 // Rough estimate (4x4 = 16)
-		} else {
-			start := time.Now()
-			inSize, outSize, activeDuration, err = upscaleFile(job.src, job.dst, upscaler)
-			wallDuration = time.Since(start)
-		}
+		start := time.Now()
+		inSize, outSize, activeDuration, err = upscaleFile(job.src, job.dst, upscaler)
+		wallDuration = time.Since(start)
 
 		cost := calculateCost(upscaleProvider, activeDuration)
 
@@ -242,9 +227,7 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 			metrics.TotalBilledTime += activeDuration
 		}
 		metrics.Files = append(metrics.Files, metric)
-		if dryRun {
-			time.Sleep(50 * time.Millisecond) // Just to make the bar visible
-		}
+
 	}
 	metrics.TotalTime = time.Since(startAll)
 
@@ -254,15 +237,6 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 
 	displayMetrics(metrics)
 	return nil
-}
-
-func estimateDuration(provider string, size int64) time.Duration {
-	mb := float64(size) / (1024 * 1024)
-	if provider == "local" {
-		return time.Second + time.Duration(mb*5)*time.Second
-	}
-	// Remote
-	return 5*time.Second + time.Duration(mb*10)*time.Second
 }
 
 func calculateCost(provider string, duration time.Duration) float64 {
@@ -317,11 +291,7 @@ func upscaleFile(src, dst string, upscaler iocore.Upscaler) (int64, int64, time.
 }
 
 func displayMetrics(m *batchMetrics) {
-	title := "Upscale Summary"
-	if m.IsDryRun {
-		title = "Upscale Summary (ESTIMATED - DRY RUN)"
-	}
-	fmt.Printf("\n\n--- %s ---\n", title)
+	fmt.Printf("\n\n--- Upscale Summary ---\n")
 	table := tablewriter.NewTable(os.Stdout,
 		tablewriter.WithHeader([]string{"Metric", "Value"}),
 	)
@@ -387,7 +357,6 @@ func init() {
 	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
 	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
 	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
-	upscaleCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Estimate time/cost without actually upscaling")
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
