@@ -43,8 +43,9 @@ type fileMetric struct {
 }
 
 var upscaleCmd = &cobra.Command{
-	Use:   "upscale",
-	Short: "Upscale images using local or remote providers",
+	Use:          "upscale",
+	Short:        "Upscale images using local or remote providers",
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if input == "" || output == "" {
 			return fmt.Errorf("input and output are required")
@@ -195,8 +196,11 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	}
 
 	// Create upscaler AFTER callback is set so it's captured in the config copy
-	upscaler, err := iocore.NewUpscaler(*config)
+	upscaler, err := iocore.NewUpscaler(context.Background(), *config)
 	if err != nil {
+		if config.Provider == iocore.ProviderRunPod {
+			fmt.Fprintf(os.Stderr, "\r%-60s\r", "") // clear status line
+		}
 		return err
 	}
 

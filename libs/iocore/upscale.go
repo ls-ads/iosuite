@@ -21,10 +21,13 @@ const (
 	ProviderRunPod    UpscaleProvider = "runpod"
 )
 
-const (
-	// Opinionated names for auto-provisioning
-	RunPodIOImgEndpointName = "ioimg-real-esrgan"
-)
+// GetRunPodEndpointName returns the endpoint name prefix for a given model
+func GetRunPodEndpointName(model string) string {
+	if model == "real-esrgan" || model == "" {
+		return "ioimg-real-esrgan"
+	}
+	return "ioimg-" + model
+}
 
 // RunPodStatusUpdate provides progress information during RunPod job execution.
 type RunPodStatusUpdate struct {
@@ -47,14 +50,40 @@ type Upscaler interface {
 }
 
 // NewUpscaler returns an Upscaler implementation based on the provided config.
-func NewUpscaler(config UpscaleConfig) (Upscaler, error) {
+func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
 	switch config.Provider {
 	case ProviderLocal:
 		return &localUpscaler{config: config}, nil
 	case ProviderReplicate:
 		return &replicateUpscaler{config: config}, nil
 	case ProviderRunPod:
-		return &runpodUpscaler{config: config}, nil
+		key := config.APIKey
+		if key == "" {
+			key = os.Getenv("RUNPOD_API_KEY")
+		}
+		if key == "" {
+			return nil, fmt.Errorf("runpod API key is required (set via -k or RUNPOD_API_KEY)")
+		}
+
+		if config.StatusCallback != nil {
+			config.StatusCallback(RunPodStatusUpdate{Phase: "infrastructure", Message: "Checking RunPod endpoints..."})
+		}
+
+		endpointName := GetRunPodEndpointName(config.Model)
+		endpoints, err := GetRunPodEndpoints(ctx, key, endpointName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to search for runpod infrastructure: %v", err)
+		}
+
+		if len(endpoints) == 0 {
+			return nil, fmt.Errorf("no runpod endpoint found for model '%s' (endpoint prefix '%s'). please run 'ioimg upscale init -p runpod -m %s' first", config.Model, endpointName, config.Model)
+		}
+
+		if config.StatusCallback != nil {
+			config.StatusCallback(RunPodStatusUpdate{Phase: "infrastructure", Message: "Found existing RunPod endpoint"})
+		}
+
+		return &runpodUpscaler{config: config, endpointID: endpoints[0].ID}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -148,7 +177,8 @@ func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Write
 }
 
 type runpodUpscaler struct {
-	config UpscaleConfig
+	config     UpscaleConfig
+	endpointID string
 }
 
 func (u *runpodUpscaler) emitStatus(phase, message string, elapsed time.Duration) {
@@ -166,21 +196,6 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	if key == "" {
 		key = os.Getenv("RUNPOD_API_KEY")
 	}
-	if key == "" {
-		return 0, fmt.Errorf("runpod API key is required (set via -k or RUNPOD_API_KEY)")
-	}
-
-	endpoints, err := GetRunPodEndpoints(ctx, key, RunPodIOImgEndpointName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to search for runpod infrastructure: %v", err)
-	}
-
-	if len(endpoints) == 0 {
-		return 0, fmt.Errorf("no runpod endpoint found for '%s'. please run 'ioimg upscale init -p runpod' first", RunPodIOImgEndpointName)
-	}
-
-	endpointID := endpoints[0].ID
-	u.emitStatus("infrastructure", "Found existing RunPod endpoint", 0)
 
 	switch u.config.Model {
 	case "real-esrgan", "":
@@ -195,7 +210,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		return 0, err
 	}
 
-	jobID, err := SubmitRunPodJob(ctx, key, endpointID, map[string]interface{}{
+	jobID, err := SubmitRunPodJob(ctx, key, u.endpointID, map[string]interface{}{
 		"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
 	})
 	if err != nil {
@@ -203,7 +218,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	// 3. Poll /status/{jobId} until COMPLETED or FAILED
-	job, err := PollRunPodJob(ctx, key, endpointID, jobID, u.emitStatus)
+	job, err := PollRunPodJob(ctx, key, u.endpointID, jobID, u.emitStatus)
 	if err != nil {
 		return 0, err
 	}

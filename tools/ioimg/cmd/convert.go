@@ -5,18 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"iosuite.io/libs/iocore"	
+	"iosuite.io/libs/iocore"
 )
-
-var (
-	input  string
-	output string
-)
-
-var rootCmd = &cobra.Command{
-	Use:   "ioimg",
-	Short: "iosuite image processing tool",
-}
 
 var convertCmd = &cobra.Command{
 	Use:   "convert",
@@ -45,12 +35,6 @@ var convertCmd = &cobra.Command{
 	},
 }
 
-func Execute() error {
-	return rootCmd.Execute()
-}
-
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&input, "input", "i", "", "Input image path")
-	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Output image path")
 	rootCmd.AddCommand(convertCmd)
 }
