@@ -83,7 +83,7 @@ var cleanupRunPodCmd = &cobra.Command{
 func init() {
 	// Root cleanup command flags (if any apply to all)
 	cleanupRunPodCmd.Flags().StringVarP(&cleanupAPIKey, "api-key", "k", "", "API Key for RunPod")
-	cleanupRunPodCmd.Flags().StringVarP(&cleanupModel, "model", "m", "real-esrgan", "Model or Endpoint ID to cleanup")
+	cleanupRunPodCmd.Flags().StringVarP(&cleanupModel, "model", "m", "real-esrgan", "Upscale model to cleanup")
 	cleanupRunPodCmd.Flags().BoolVarP(&cleanupYes, "yes", "y", false, "Skip confirmation prompt")
 
 	cleanupCmd.AddCommand(cleanupRunPodCmd)

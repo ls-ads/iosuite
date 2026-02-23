@@ -101,6 +101,42 @@ var upscaleInitCmd = &cobra.Command{
 	},
 }
 
+var upscaleModelCmd = &cobra.Command{
+	Use:   "model",
+	Short: "Manage upscale models",
+}
+
+var upscaleModelListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available upscale models",
+	Run: func(cmd *cobra.Command, args []string) {
+		table := tablewriter.NewTable(os.Stdout,
+			tablewriter.WithHeader([]string{"Model", "Scale", "Providers"}),
+		)
+		table.Append("real-esrgan", "4x", "local, replicate, runpod")
+		table.Render()
+	},
+}
+
+var upscaleProviderCmd = &cobra.Command{
+	Use:   "provider",
+	Short: "Manage upscale providers",
+}
+
+var upscaleProviderListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available upscale providers",
+	Run: func(cmd *cobra.Command, args []string) {
+		table := tablewriter.NewTable(os.Stdout,
+			tablewriter.WithHeader([]string{"Provider", "Type", "Requires API Key"}),
+		)
+		table.Append("local", "Local GPU (ncnn-vulkan)", "No")
+		table.Append("replicate", "Cloud API", "Yes (REPLICATE_API_KEY)")
+		table.Append("runpod", "Cloud API", "Yes (RUNPOD_API_KEY)")
+		table.Render()
+	},
+}
+
 type upscaleJob struct {
 	src string
 	dst string
@@ -354,14 +390,18 @@ func isImage(path string) bool {
 }
 
 func init() {
-	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
-	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
-	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
+	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
+	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
+	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
 
-	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
-	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
-	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
+	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
+	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
+	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
 
+	upscaleModelCmd.AddCommand(upscaleModelListCmd)
+	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)
 	upscaleCmd.AddCommand(upscaleInitCmd)
+	upscaleCmd.AddCommand(upscaleModelCmd)
+	upscaleCmd.AddCommand(upscaleProviderCmd)
 	rootCmd.AddCommand(upscaleCmd)
 }
