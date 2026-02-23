@@ -110,130 +110,66 @@ type RunPodJobResponse struct {
 	Error string `json:"error"`
 }
 
-// SubmitRunPodJob submits an async job to a RunPod endpoint.
-func SubmitRunPodJob(ctx context.Context, key, endpointID string, input map[string]interface{}) (string, error) {
+// RunRunPodJobSync submits a job to a RunPod endpoint using the /runsync endpoint,
+// which blocks server-side until the job completes. This eliminates polling latency
+// entirely — the result is returned the instant the job finishes.
+func RunRunPodJobSync(ctx context.Context, key, endpointID string, input map[string]interface{}, statusCallback func(phase, message string, elapsed time.Duration)) (*RunPodJobResponse, error) {
 	reqBody := RunPodJobRequest{
 		Input: input,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	runURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/run", endpointID)
-	req, err := http.NewRequestWithContext(ctx, "POST", runURL, bytes.NewBuffer(jsonData))
+	// Use /runsync — RunPod holds the connection open until the job completes
+	runsyncURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/runsync", endpointID)
+	req, err := http.NewRequestWithContext(ctx, "POST", runsyncURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	start := time.Now()
+	if statusCallback != nil {
+		statusCallback("queued", "Submitted job, waiting for result...", 0)
+	}
+
+	// Use a generous timeout — cold starts can take minutes
+	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("runsync request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read runpod response: %v", err)
+		return nil, fmt.Errorf("failed to read runsync response: %v", err)
 	}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		return "", fmt.Errorf("runpod job submission failed with status %s: %s", resp.Status, string(body))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("runsync returned status %s: %s", resp.Status, string(body))
 	}
 
-	var runResp RunPodJobResponse
-	if err := json.Unmarshal(body, &runResp); err != nil {
-		return "", fmt.Errorf("failed to unmarshal runpod run response: %v, body: %s", err, string(body))
-	}
-
-	if runResp.ID == "" {
-		return "", fmt.Errorf("runpod returned empty job ID")
-	}
-
-	return runResp.ID, nil
-}
-
-// PollRunPodJob polls a RunPod job until it completes or fails.
-func PollRunPodJob(ctx context.Context, key, endpointID, jobID string, statusCallback func(phase, message string, elapsed time.Duration)) (*RunPodJobResponse, error) {
-	const (
-		pollInterval = 3 * time.Second
-		maxWait      = 5 * time.Minute
-	)
-	statusURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/status/%s", endpointID, jobID)
-	pollStart := time.Now()
-
-	client := &http.Client{}
 	var job RunPodJobResponse
+	if err := json.Unmarshal(body, &job); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal runsync response: %v, body: %s", err, string(body))
+	}
 
-	for {
-		elapsed := time.Since(pollStart)
-		if elapsed > maxWait {
-			return nil, fmt.Errorf("runpod job %s timed out after %s (last status: %s)", jobID, maxWait, job.Status)
+	switch job.Status {
+	case "COMPLETED":
+		if statusCallback != nil {
+			statusCallback("completed", "Processing complete", elapsed)
 		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(pollInterval):
-		}
-
-		statusReq, err := http.NewRequestWithContext(ctx, "GET", statusURL, nil)
-		if err != nil {
-			return nil, err
-		}
-		statusReq.Header.Set("Authorization", "Bearer "+key)
-
-		statusResp, err := client.Do(statusReq)
-		if err != nil {
-			Debug("poll error, retrying", "error", err)
-			continue
-		}
-
-		statusBody, err := io.ReadAll(statusResp.Body)
-		statusResp.Body.Close()
-		if err != nil {
-			Debug("poll read error, retrying", "error", err)
-			continue
-		}
-
-		if statusResp.StatusCode != http.StatusOK {
-			Debug("poll non-200, retrying", "status", statusResp.StatusCode)
-			continue
-		}
-
-		if err := json.Unmarshal(statusBody, &job); err != nil {
-			Debug("poll unmarshal error, retrying", "error", err)
-			continue
-		}
-
-		switch job.Status {
-		case "COMPLETED":
-			if statusCallback != nil {
-				statusCallback("completed", "Processing complete", elapsed)
-			}
-			return &job, nil
-		case "FAILED":
-			return nil, fmt.Errorf("runpod job failed: %s", job.Error)
-		case "IN_PROGRESS":
-			if statusCallback != nil {
-				statusCallback("in_progress", "Processing on GPU...", elapsed)
-			}
-			continue
-		case "IN_QUEUE":
-			if statusCallback != nil {
-				statusCallback("queued", "Waiting for GPU worker (cold start)...", elapsed)
-			}
-			continue
-		default:
-			if statusCallback != nil {
-				statusCallback("queued", fmt.Sprintf("Status: %s", job.Status), elapsed)
-			}
-			continue
-		}
+		return &job, nil
+	case "FAILED":
+		return nil, fmt.Errorf("runpod job failed: %s", job.Error)
+	default:
+		return nil, fmt.Errorf("runsync returned unexpected status: %s", job.Status)
 	}
 }
 

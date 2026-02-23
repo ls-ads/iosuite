@@ -223,15 +223,10 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		return 0, err
 	}
 
-	jobID, err := SubmitRunPodJob(ctx, key, u.endpointID, map[string]interface{}{
+	// 2. Submit via /runsync — blocks until result is ready, zero polling overhead
+	job, err := RunRunPodJobSync(ctx, key, u.endpointID, map[string]interface{}{
 		"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	// 3. Poll /status/{jobId} until COMPLETED or FAILED
-	job, err := PollRunPodJob(ctx, key, u.endpointID, jobID, u.emitStatus)
+	}, u.emitStatus)
 	if err != nil {
 		return 0, err
 	}
