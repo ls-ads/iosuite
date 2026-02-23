@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
-	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"iosuite.io/libs/iocore"
 )
@@ -164,21 +163,6 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	}
 	startAll := time.Now()
 
-	useProgressBar := config.Provider != iocore.ProviderRunPod
-
-	var bar *progressbar.ProgressBar
-	if useProgressBar {
-		bar = progressbar.NewOptions(len(jobs),
-			progressbar.OptionSetDescription("Upscaling"),
-			progressbar.OptionSetWriter(os.Stderr),
-			progressbar.OptionShowCount(),
-			progressbar.OptionShowIts(),
-			progressbar.OptionSpinnerType(14),
-			progressbar.OptionFullWidth(),
-			progressbar.OptionClearOnFinish(),
-		)
-	}
-
 	// Wire up StatusCallback for RunPod progress updates BEFORE creating upscaler
 	if config.Provider == iocore.ProviderRunPod {
 		config.StatusCallback = func(update iocore.RunPodStatusUpdate) {
@@ -212,13 +196,14 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 			avgTime = time.Since(startAll) / time.Duration(len(metrics.Files))
 		}
 
-		if useProgressBar {
+		if config.Provider != iocore.ProviderRunPod {
 			descPrefix := "Upscaling"
 			if dryRun {
 				descPrefix = "[DRY-RUN] Estimating"
 			}
-			bar.Describe(fmt.Sprintf("%s [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
-				descPrefix, metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile))
+			msg := fmt.Sprintf("%s [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
+				descPrefix, metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile)
+			fmt.Fprintf(os.Stderr, "\r%-80s", msg)
 		}
 
 		var inSize, outSize int64
@@ -257,14 +242,15 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 			metrics.TotalBilledTime += activeDuration
 		}
 		metrics.Files = append(metrics.Files, metric)
-		if useProgressBar {
-			bar.Add(1)
-		}
 		if dryRun {
 			time.Sleep(50 * time.Millisecond) // Just to make the bar visible
 		}
 	}
 	metrics.TotalTime = time.Since(startAll)
+
+	if config.Provider != iocore.ProviderRunPod {
+		fmt.Fprintf(os.Stderr, "\r%-80s\r", "")
+	}
 
 	displayMetrics(metrics)
 	return nil
