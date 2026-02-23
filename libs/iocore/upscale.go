@@ -38,7 +38,6 @@ type UpscaleConfig struct {
 	Provider       UpscaleProvider
 	APIKey         string
 	Model          string                   // Model name (e.g., "real-esrgan")
-	Scale          int                      // e.g., 2, 4
 	StatusCallback func(RunPodStatusUpdate) // Optional callback for progress updates
 }
 
@@ -74,7 +73,8 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 		return 0, fmt.Errorf("model not supported: %s", u.config.Model)
 	}
 
-	cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan", "-i", "-", "-o", "-", "-s", fmt.Sprintf("%d", u.config.Scale))
+	// Both local and runpod implementations now assume scale 4 for realism & consistency
+	cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan", "-i", "-", "-o", "-", "-s", "4")
 	cmd.Stdin = r
 	cmd.Stdout = w
 
@@ -115,7 +115,7 @@ func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Write
 	url := "https://api.replicate.com/v1/models/nightmareai/real-esrgan/predictions"
 	prediction, err := RunReplicatePrediction(ctx, key, url, map[string]interface{}{
 		"image": fmt.Sprintf("data:image/png;base64,%s", base64.StdEncoding.EncodeToString(buf.Bytes())),
-		"scale": u.config.Scale,
+		"scale": 4,
 	})
 	if err != nil {
 		return 0, err

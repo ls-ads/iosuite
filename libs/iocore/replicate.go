@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // ReplicatePredictionRequest represents the input for a Replicate prediction.
@@ -29,7 +28,7 @@ type ReplicatePredictionResponse struct {
 }
 
 // RunReplicatePrediction starts a prediction and waits for it to finish.
-func RunReplicatePrediction(ctx context.Context, key, modelVersion string, input map[string]interface{}) (*ReplicatePredictionResponse, error) {
+func RunReplicatePrediction(ctx context.Context, key, url string, input map[string]interface{}) (*ReplicatePredictionResponse, error) {
 	reqBody := ReplicatePredictionRequest{
 		Input: input,
 	}
@@ -37,14 +36,6 @@ func RunReplicatePrediction(ctx context.Context, key, modelVersion string, input
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
-	}
-
-	// Assuming a full URL or model string like "nightmareai/real-esrgan"
-	// For standard models, the URL is https://api.replicate.com/v1/models/{model_owner}/{model_name}/predictions
-	// For this specific use case we'll hardcode the URL as it was in upscale.go or allow passing the URL
-	url := "https://api.replicate.com/v1/models/nightmareai/real-esrgan/predictions"
-	if strings.Contains(modelVersion, "/") {
-		url = fmt.Sprintf("https://api.replicate.com/v1/models/%s/predictions", modelVersion)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))

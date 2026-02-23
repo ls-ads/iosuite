@@ -17,7 +17,6 @@ import (
 var (
 	upscaleProvider string
 	apiKey          string
-	scale           int
 	model           string
 	dryRun          bool
 )
@@ -54,7 +53,6 @@ var upscaleCmd = &cobra.Command{
 		config := iocore.UpscaleConfig{
 			Provider: iocore.UpscaleProvider(upscaleProvider),
 			APIKey:   apiKey,
-			Scale:    scale,
 			Model:    model,
 		}
 
@@ -227,7 +225,7 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 			inSize = info.Size()
 			activeDuration = estimateDuration(upscaleProvider, inSize)
 			wallDuration = 100 * time.Millisecond // Dry run is fast
-			outSize = inSize * int64(scale*scale) // Rough estimate
+			outSize = inSize * 16                 // Rough estimate (4x4 = 16)
 		} else {
 			start := time.Now()
 			inSize, outSize, activeDuration, err = upscaleFile(job.src, job.dst, upscaler)
@@ -397,7 +395,6 @@ func isImage(path string) bool {
 func init() {
 	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
 	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
-	upscaleCmd.Flags().IntVarP(&scale, "scale", "s", 2, "Scale factor (2, 4)")
 	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
 	upscaleCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Estimate time/cost without actually upscaling")
 
