@@ -13,6 +13,7 @@ import (
 var (
 	cleanupAPIKey string
 	cleanupYes    bool
+	cleanupModel  string
 )
 
 var cleanupCmd = &cobra.Command{
@@ -34,9 +35,10 @@ var cleanupRunPodCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		fmt.Printf("Searching for RunPod endpoints with prefix '%s'...\n", iocore.RunPodIOImgEndpointName)
+		endpointName := iocore.GetRunPodEndpointName(cleanupModel)
+		fmt.Printf("Searching for RunPod endpoints with prefix '%s'...\n", endpointName)
 
-		endpoints, err := iocore.GetRunPodEndpoints(ctx, key, iocore.RunPodIOImgEndpointName)
+		endpoints, err := iocore.GetRunPodEndpoints(ctx, key, endpointName)
 		if err != nil {
 			return fmt.Errorf("failed to get RunPod endpoints: %v", err)
 		}
@@ -81,6 +83,7 @@ var cleanupRunPodCmd = &cobra.Command{
 func init() {
 	// Root cleanup command flags (if any apply to all)
 	cleanupRunPodCmd.Flags().StringVarP(&cleanupAPIKey, "api-key", "k", "", "API Key for RunPod")
+	cleanupRunPodCmd.Flags().StringVarP(&cleanupModel, "model", "m", "real-esrgan", "Model or Endpoint ID to cleanup")
 	cleanupRunPodCmd.Flags().BoolVarP(&cleanupYes, "yes", "y", false, "Skip confirmation prompt")
 
 	cleanupCmd.AddCommand(cleanupRunPodCmd)

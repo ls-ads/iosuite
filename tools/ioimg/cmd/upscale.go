@@ -81,11 +81,12 @@ var upscaleInitCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		fmt.Printf("Provisioning RunPod endpoint '%s'...\n", iocore.RunPodIOImgEndpointName)
+		endpointName := iocore.GetRunPodEndpointName(model)
+		fmt.Printf("Provisioning RunPod endpoint '%s'...\n", endpointName)
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
 		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
-			Name:        iocore.RunPodIOImgEndpointName,
+			Name:        endpointName,
 			TemplateID:  "047z8w5i69",
 			GPUTypeIDs:  []string{"NVIDIA RTX A4000"}, // 16GB tier
 			WorkersMin:  0,
@@ -404,6 +405,7 @@ func init() {
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider (local, replicate, runpod)")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API Key for remote provider")
+	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Model, Version, or Endpoint ID")
 
 	upscaleCmd.AddCommand(upscaleInitCmd)
 	rootCmd.AddCommand(upscaleCmd)
