@@ -67,7 +67,7 @@ ioimg upscale -i photos/ -r -p runpod
 
 #### Resume / Overwrite
 
-By default, files whose output already exists are **skipped**. This lets you resume an interrupted batch without reprocessing completed files:
+By default, files whose output already exists are **skipped**, making the command **idempotent** — running it multiple times with the same arguments is safe and produces the same result. This also lets you resume an interrupted batch without reprocessing completed files:
 
 ```bash
 # First run processes all 100 images; interrupted at image 60
