@@ -285,7 +285,7 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	}
 
 	// Create upscaler AFTER callback is set so it's captured in the config copy
-	upscaler, err := iocore.NewUpscaler(context.Background(), *config)
+	upscaler, err := iocore.NewUpscaler(context.Background(), config)
 	if config.Provider == iocore.ProviderRunPod {
 		fmt.Fprintf(os.Stderr, "\r%-60s\r", "") // clear status line
 	}

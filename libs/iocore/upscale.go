@@ -51,7 +51,7 @@ type Upscaler interface {
 }
 
 // NewUpscaler returns an Upscaler implementation based on the provided config.
-func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
+func NewUpscaler(ctx context.Context, config *UpscaleConfig) (Upscaler, error) {
 	switch config.Provider {
 	case ProviderLocal:
 		return &localUpscaler{config: config}, nil
@@ -99,7 +99,7 @@ func NewUpscaler(ctx context.Context, config UpscaleConfig) (Upscaler, error) {
 // Stubs for implementations
 
 type localUpscaler struct {
-	config UpscaleConfig
+	config *UpscaleConfig
 }
 
 func (u *localUpscaler) Rate() float64 { return 0.0 }
@@ -131,7 +131,7 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 }
 
 type replicateUpscaler struct {
-	config UpscaleConfig
+	config *UpscaleConfig
 }
 
 func (u *replicateUpscaler) Rate() float64 { return 0.000225 }
@@ -192,7 +192,7 @@ func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Write
 }
 
 type runpodUpscaler struct {
-	config     UpscaleConfig
+	config     *UpscaleConfig
 	endpointID string
 	rate       float64
 }
