@@ -48,6 +48,7 @@ type UpscaleConfig struct {
 type Upscaler interface {
 	Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error)
 	Rate() float64
+	IsActive() bool
 }
 
 // NewUpscaler returns an Upscaler implementation based on the provided config.
@@ -89,8 +90,9 @@ func NewUpscaler(ctx context.Context, config *UpscaleConfig) (Upscaler, error) {
 		}
 
 		rate := CalculateRunPodEndpointRate(endpoints[0].GPUTypeIDs, endpoints[0].WorkersMin)
+		isActive := endpoints[0].WorkersMin > 0
 
-		return &runpodUpscaler{config: config, endpointID: endpoints[0].ID, rate: rate}, nil
+		return &runpodUpscaler{config: config, endpointID: endpoints[0].ID, rate: rate, isActive: isActive}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", config.Provider)
 	}
@@ -102,7 +104,8 @@ type localUpscaler struct {
 	config *UpscaleConfig
 }
 
-func (u *localUpscaler) Rate() float64 { return 0.0 }
+func (u *localUpscaler) Rate() float64  { return 0.0 }
+func (u *localUpscaler) IsActive() bool { return false }
 
 func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
 	Info("Upscaling locally", "model", u.config.Model)
@@ -134,7 +137,8 @@ type replicateUpscaler struct {
 	config *UpscaleConfig
 }
 
-func (u *replicateUpscaler) Rate() float64 { return 0.000225 }
+func (u *replicateUpscaler) Rate() float64  { return 0.000225 }
+func (u *replicateUpscaler) IsActive() bool { return false }
 
 func (u *replicateUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
 	Info("Upscaling via Replicate", "model", u.config.Model)
@@ -195,9 +199,11 @@ type runpodUpscaler struct {
 	config     *UpscaleConfig
 	endpointID string
 	rate       float64
+	isActive   bool
 }
 
-func (u *runpodUpscaler) Rate() float64 { return u.rate }
+func (u *runpodUpscaler) Rate() float64  { return u.rate }
+func (u *runpodUpscaler) IsActive() bool { return u.isActive }
 
 func (u *runpodUpscaler) emitStatus(phase, message string, elapsed time.Duration) {
 	if u.config.StatusCallback != nil {

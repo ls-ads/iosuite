@@ -118,21 +118,21 @@ ioimg upscale -i photos/ -r -p runpod --json
 After processing, a summary table is displayed:
 
 ```
-┌──────────────┬──────────────┐
-│    METRIC    │    VALUE     │
-├──────────────┼──────────────┤
-│ Total Files  │ 6            │
-│ Skipped      │ 2            │
-│ Succeeded    │ 3            │
-│ Failed       │ 1            │
-│ Total Time   │ 42.310s      │
-│ Billed Time  │ 18.600s      │
-│ Avg Time/Img │ 3.720s       │
-│ Total Cost   │ $0.0038      │
-│ Avg Cost/Img │ $0.0008      │
-│ Input Size   │ 2.45 MB      │
-│ Output Size  │ 38.12 MB     │
-└──────────────┴──────────────┘
+┌─────────────────┬──────────────┐
+│     METRIC      │    VALUE     │
+├─────────────────┼──────────────┤
+│ Total Files     │ 6            │
+│ Skipped         │ 2            │
+│ Succeeded       │ 3            │
+│ Failed          │ 1            │
+│ Total Time      │ 42.310s      │
+│ Processing Time │ 18.600s      │
+│ Avg Time/Img    │ 3.720s       │
+│ Total Cost      │ $0.0038      │
+│ Avg Cost/Img    │ $0.0008      │
+│ Input Size      │ 2.45 MB      │
+│ Output Size     │ 38.12 MB     │
+└─────────────────┴──────────────┘
 ```
 
 | Metric | Description |
@@ -142,9 +142,9 @@ After processing, a summary table is displayed:
 | **Succeeded** | Images upscaled successfully |
 | **Failed** | Images that failed (errors listed below the table) |
 | **Total Time** | Wall-clock time from start to finish, including network overhead |
-| **Billed Time** | Sum of GPU execution time reported by the provider (what you pay for) |
-| **Avg Time/Img** | Average billed time per successful image (`Billed Time / Succeeded`) |
-| **Total Cost** | Estimated total cost based on billed time × provider rate |
+| **Processing Time** | Sum of GPU execution time reported by the provider |
+| **Avg Time/Img** | Average processing time per successful image (`Processing Time / Succeeded`) |
+| **Total Cost** | Estimated total cost — based on wall time for active endpoints, or execution time for flex |
 | **Avg Cost/Img** | Average cost per successful image (`Total Cost / Succeeded`) |
 | **Input Size** | Combined size of all input files |
 | **Output Size** | Combined size of all output files |
@@ -153,12 +153,38 @@ Use `--json` to get the same metrics in machine-readable JSON format.
 
 ### `ioimg upscale init`
 
-Provision cloud infrastructure for upscaling.
+Provision cloud infrastructure for upscaling. Currently supports RunPod.
 
 ```bash
-# Initialize a RunPod endpoint
+# Initialize a RunPod endpoint (flex, all regions)
 ioimg upscale init -p runpod
+
+# Always-active endpoint in the US
+ioimg upscale init -p runpod --active --region us
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` / `-p` | `local` | Provider to initialize |
+| `--api-key` / `-k` | | API key (or set `RUNPOD_API_KEY`) |
+| `--model` / `-m` | `real-esrgan` | Model to provision |
+| `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
+| `--region` | `all` | Region constraint: `us`, `eu`, `ca`, or `all` |
+
+If an endpoint for the model already exists, the command reports it and exits without creating a duplicate.
+
+**Active vs Flex pricing**: Active endpoints have a lower per-second rate but you pay for the always-on worker even when idle. Flex endpoints scale to zero but have a higher per-second rate and cold-start latency.
+
+#### Supported GPUs
+
+Endpoints are configured to use the following GPU types (in priority order):
+
+- NVIDIA RTX A4000
+- NVIDIA RTX A4500
+- NVIDIA RTX 4000 Ada Generation
+- NVIDIA RTX 4000 SFF Ada Generation
+- NVIDIA RTX 2000 Ada Generation
+- NVIDIA RTX A2000
 
 ### `ioimg upscale model list`
 

@@ -394,7 +394,12 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		inSize, outSize, activeDuration, err = upscaleFile(job.src, job.dst, upscaler)
 		wallDuration = time.Since(start)
 
-		cost := calculateCost(upscaleProvider, activeDuration)
+		// Active endpoints bill on wall time; flex endpoints bill on execution time
+		costDuration := activeDuration
+		if upscaler.IsActive() {
+			costDuration = wallDuration
+		}
+		cost := calculateCost(upscaler.Rate(), costDuration, upscaler.IsActive())
 
 		metric := fileMetric{
 			Name:     filepath.Base(job.src),
@@ -441,24 +446,20 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	return nil
 }
 
-func calculateCost(provider string, duration time.Duration) float64 {
+func calculateCost(rate float64, duration time.Duration, isActive bool) float64 {
+	if rate == 0 {
+		return 0.0
+	}
 	seconds := duration.Seconds()
-	switch provider {
-	case "replicate":
-		// ~$0.000225 per second (T4 GPU)
-		return seconds * 0.000225
-	case "runpod":
-		// ~$0.00019 per second (Standard mid-range), rounded up to the next full second as per RunPod policy
+	if !isActive {
+		// Flex billing rounds up to the next full second
 		billingSeconds := float64(int(seconds))
 		if seconds > billingSeconds {
 			billingSeconds += 1
 		}
-		return billingSeconds * 0.00019
-	case "local":
-		fallthrough
-	default:
-		return 0.0
+		return billingSeconds * rate
 	}
+	return seconds * rate
 }
 
 func upscaleFile(src, dst string, upscaler iocore.Upscaler) (int64, int64, time.Duration, error) {
@@ -516,18 +517,18 @@ func displayMetrics(m *batchMetrics) {
 		}
 
 		result := map[string]interface{}{
-			"total_files":  m.TotalFiles,
-			"skipped":      m.Skipped,
-			"succeeded":    m.Success,
-			"failed":       m.Failure,
-			"total_time":   m.TotalTime.Round(time.Millisecond).String(),
-			"billed_time":  m.TotalBilledTime.Round(time.Millisecond).String(),
-			"avg_time_img": avgTime.Round(time.Millisecond).String(),
-			"total_cost":   m.TotalCost,
-			"avg_cost_img": avgCost,
-			"input_bytes":  m.InputBytes,
-			"output_bytes": m.OutputBytes,
-			"files":        files,
+			"total_files":     m.TotalFiles,
+			"skipped":         m.Skipped,
+			"succeeded":       m.Success,
+			"failed":          m.Failure,
+			"total_time":      m.TotalTime.Round(time.Millisecond).String(),
+			"processing_time": m.TotalBilledTime.Round(time.Millisecond).String(),
+			"avg_time_img":    avgTime.Round(time.Millisecond).String(),
+			"total_cost":      m.TotalCost,
+			"avg_cost_img":    avgCost,
+			"input_bytes":     m.InputBytes,
+			"output_bytes":    m.OutputBytes,
+			"files":           files,
 		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -552,7 +553,7 @@ func displayMetrics(m *batchMetrics) {
 		{"Succeeded", fmt.Sprintf("%d", m.Success)},
 		{"Failed", fmt.Sprintf("%d", m.Failure)},
 		{"Total Time", m.TotalTime.Round(time.Millisecond).String()},
-		{"Billed Time", m.TotalBilledTime.Round(time.Millisecond).String()},
+		{"Processing Time", m.TotalBilledTime.Round(time.Millisecond).String()},
 		{"Avg Time/Img", avgTime.Round(time.Millisecond).String()},
 		{"Total Cost", fmt.Sprintf("$%.4f", m.TotalCost)},
 		{"Avg Cost/Img", fmt.Sprintf("$%.4f", avgCost)},
