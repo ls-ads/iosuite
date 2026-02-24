@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 	"iosuite.io/libs/iocore"
 )
@@ -152,7 +153,9 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		return err
 	}
 
-	if info.IsDir() {
+	isBatch := info.IsDir()
+
+	if isBatch {
 		err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -199,8 +202,12 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	startAll := time.Now()
 
 	// Wire up StatusCallback for RunPod progress updates BEFORE creating upscaler
+	batchStarted := false
 	if config.Provider == iocore.ProviderRunPod {
 		config.StatusCallback = func(update iocore.RunPodStatusUpdate) {
+			if batchStarted {
+				return // progress bar handles display during batch processing
+			}
 			elapsed := ""
 			if update.Elapsed > 0 {
 				elapsed = fmt.Sprintf(" (%s)", update.Elapsed.Round(time.Second))
@@ -217,26 +224,26 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 
 	// Create upscaler AFTER callback is set so it's captured in the config copy
 	upscaler, err := iocore.NewUpscaler(context.Background(), *config)
+	if config.Provider == iocore.ProviderRunPod {
+		fmt.Fprintf(os.Stderr, "\r%-60s\r", "") // clear status line
+	}
 	if err != nil {
-		if config.Provider == iocore.ProviderRunPod {
-			fmt.Fprintf(os.Stderr, "\r%-60s\r", "") // clear status line
-		}
 		return err
 	}
 
+	var bar *progressbar.ProgressBar
+	if isBatch {
+		batchStarted = true
+		bar = progressbar.NewOptions(len(jobs),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionSetWidth(30),
+			progressbar.OptionShowCount(),
+			progressbar.OptionClearOnFinish(),
+		)
+		bar.RenderBlank()
+	}
+
 	for _, job := range jobs {
-		currentFile := filepath.Base(job.src)
-		avgTime := time.Duration(0)
-		if len(metrics.Files) > 0 {
-			avgTime = time.Since(startAll) / time.Duration(len(metrics.Files))
-		}
-
-		if config.Provider != iocore.ProviderRunPod {
-			msg := fmt.Sprintf("Upscaling [S:%d|F:%d|Avg:%s|Cost:$%.4f] %s",
-				metrics.Success, metrics.Failure, avgTime.Round(time.Millisecond), metrics.TotalCost, currentFile)
-			fmt.Fprintf(os.Stderr, "\r%-80s", msg)
-		}
-
 		var inSize, outSize int64
 		var activeDuration, wallDuration time.Duration
 		var err error
@@ -248,7 +255,7 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		cost := calculateCost(upscaleProvider, activeDuration)
 
 		metric := fileMetric{
-			Name:     currentFile,
+			Name:     filepath.Base(job.src),
 			Duration: wallDuration,
 			Cost:     cost,
 			Success:  err == nil,
@@ -266,11 +273,14 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		}
 		metrics.Files = append(metrics.Files, metric)
 
+		if bar != nil {
+			bar.Add(1)
+		}
 	}
 	metrics.TotalTime = time.Since(startAll)
 
-	if config.Provider != iocore.ProviderRunPod {
-		fmt.Fprintf(os.Stderr, "\r%-80s\r", "")
+	if bar != nil {
+		bar.Clear()
 	}
 
 	displayMetrics(metrics)
