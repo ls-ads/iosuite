@@ -22,10 +22,12 @@ var (
 	jsonOutput      bool
 	outputFormat    string
 	recursive       bool
+	overwrite       bool
 )
 
 type batchMetrics struct {
 	TotalFiles      int
+	Skipped         int
 	Success         int
 	Failure         int
 	TotalTime       time.Duration
@@ -258,8 +260,26 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		return fmt.Errorf("no images found to process")
 	}
 
+	// Skip files whose output already exists (unless --overwrite is set)
+	totalFound := len(jobs)
+	if !overwrite {
+		var filtered []upscaleJob
+		for _, job := range jobs {
+			if _, err := os.Stat(job.dst); err == nil {
+				continue
+			}
+			filtered = append(filtered, job)
+		}
+		if skipped := totalFound - len(filtered); skipped > 0 && len(filtered) == 0 {
+			fmt.Fprintf(os.Stderr, "All %d images already processed. Use --overwrite to reprocess.\n", skipped)
+			return nil
+		}
+		jobs = filtered
+	}
+
 	metrics := &batchMetrics{
-		TotalFiles: len(jobs),
+		TotalFiles: totalFound,
+		Skipped:    totalFound - len(jobs),
 	}
 	startAll := time.Now()
 
@@ -426,6 +446,7 @@ func displayMetrics(m *batchMetrics) {
 
 		result := map[string]interface{}{
 			"total_files":  m.TotalFiles,
+			"skipped":      m.Skipped,
 			"succeeded":    m.Success,
 			"failed":       m.Failure,
 			"total_time":   m.TotalTime.Round(time.Millisecond).String(),
@@ -456,6 +477,7 @@ func displayMetrics(m *batchMetrics) {
 
 	data := [][]string{
 		{"Total Files", fmt.Sprintf("%d", m.TotalFiles)},
+		{"Skipped", fmt.Sprintf("%d", m.Skipped)},
 		{"Succeeded", fmt.Sprintf("%d", m.Success)},
 		{"Failed", fmt.Sprintf("%d", m.Failure)},
 		{"Total Time", m.TotalTime.Round(time.Millisecond).String()},
@@ -534,6 +556,7 @@ func init() {
 	upscaleCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 	upscaleCmd.Flags().StringVarP(&outputFormat, "format", "f", "", "Output format: jpg or png (default: match input)")
 	upscaleCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Recursively process subdirectories")
+	upscaleCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")

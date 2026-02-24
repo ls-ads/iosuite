@@ -20,6 +20,7 @@ ioimg upscale -i <input> [flags]
 | `--output` | `-o` | `<input>_out` | Output path (file or directory) |
 | `--format` | `-f` | match input | Output format: `jpg` or `png` |
 | `--recursive` | `-r` | `false` | Recursively process subdirectories |
+| `--overwrite` | | `false` | Reprocess all files even if output already exists |
 | `--provider` | `-p` | `local` | Upscale provider (`local`, `replicate`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
 | `--model` | `-m` | `real-esrgan` | Upscale model |
@@ -64,6 +65,21 @@ ioimg upscale -i photos/ -p runpod
 ioimg upscale -i photos/ -r -p runpod
 ```
 
+#### Resume / Overwrite
+
+By default, files whose output already exists are **skipped**. This lets you resume an interrupted batch without reprocessing completed files:
+
+```bash
+# First run processes all 100 images; interrupted at image 60
+ioimg upscale -i photos/ -p runpod
+
+# Second run picks up where you left off (skips the 60 already done)
+ioimg upscale -i photos/ -p runpod
+
+# Force reprocessing of everything
+ioimg upscale -i photos/ -p runpod --overwrite
+```
+
 #### Examples
 
 ```bash
@@ -89,7 +105,8 @@ After processing, a summary table is displayed:
 │    METRIC    │    VALUE     │
 ├──────────────┼──────────────┤
 │ Total Files  │ 6            │
-│ Succeeded    │ 5            │
+│ Skipped      │ 2            │
+│ Succeeded    │ 3            │
 │ Failed       │ 1            │
 │ Total Time   │ 42.310s      │
 │ Billed Time  │ 18.600s      │
@@ -104,6 +121,7 @@ After processing, a summary table is displayed:
 | Metric | Description |
 |--------|-------------|
 | **Total Files** | Number of images found to process |
+| **Skipped** | Images skipped because output already exists (use `--overwrite` to reprocess) |
 | **Succeeded** | Images upscaled successfully |
 | **Failed** | Images that failed (errors listed below the table) |
 | **Total Time** | Wall-clock time from start to finish, including network overhead |
