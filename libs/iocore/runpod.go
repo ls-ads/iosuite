@@ -9,6 +9,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/runpod/go-sdk/pkg/sdk"
+	"github.com/runpod/go-sdk/pkg/sdk/config"
+	rpEndpoint "github.com/runpod/go-sdk/pkg/sdk/endpoint"
 )
 
 // RunPodEndpointConfig holds configuration for auto-provisioning a RunPod Serverless Endpoint.
@@ -93,15 +97,11 @@ func EnsureRunPodEndpoint(ctx context.Context, key string, config RunPodEndpoint
 	return createData.ID, nil
 }
 
-// RunPodJobRequest represents the input for a RunPod serverless job.
-type RunPodJobRequest struct {
-	Input map[string]interface{} `json:"input"`
-}
-
 // RunPodJobResponse represents the response from a RunPod serverless job.
 type RunPodJobResponse struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
+	DelayTime     int64  `json:"delayTime"`     // queue delay in milliseconds
 	ExecutionTime int64  `json:"executionTime"` // in milliseconds
 	Output        struct {
 		Status      string `json:"status"` // Optional
@@ -110,54 +110,72 @@ type RunPodJobResponse struct {
 	Error string `json:"error"`
 }
 
-// RunRunPodJobSync submits a job to a RunPod endpoint using the /runsync endpoint,
+// NewRunPodEndpointClient creates a RunPod Go SDK endpoint client for the given API key and endpoint ID.
+func NewRunPodEndpointClient(apiKey, endpointID string) (*rpEndpoint.Endpoint, error) {
+	return rpEndpoint.New(
+		&config.Config{ApiKey: &apiKey},
+		&rpEndpoint.Option{EndpointId: &endpointID},
+	)
+}
+
+// RunRunPodJobSync submits a job to a RunPod endpoint using the Go SDK's RunSync method,
 // which blocks server-side until the job completes. This eliminates polling latency
 // entirely — the result is returned the instant the job finishes.
 func RunRunPodJobSync(ctx context.Context, key, endpointID string, input map[string]interface{}, statusCallback func(phase, message string, elapsed time.Duration)) (*RunPodJobResponse, error) {
-	reqBody := RunPodJobRequest{
-		Input: input,
-	}
-
-	jsonData, err := json.Marshal(reqBody)
+	ep, err := NewRunPodEndpointClient(key, endpointID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create RunPod endpoint client: %v", err)
 	}
-
-	// Use /runsync — RunPod holds the connection open until the job completes
-	runsyncURL := fmt.Sprintf("https://api.runpod.ai/v2/%s/runsync", endpointID)
-	req, err := http.NewRequestWithContext(ctx, "POST", runsyncURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
 	if statusCallback != nil {
 		statusCallback("queued", "Submitted job, waiting for result...", 0)
 	}
 
-	// Use a generous timeout — cold starts can take minutes
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	// RunSync blocks until the job completes (up to timeout seconds).
+	// 300s timeout to handle cold starts which can take minutes.
+	output, err := ep.RunSync(&rpEndpoint.RunSyncInput{
+		JobInput: &rpEndpoint.JobInput{
+			Input: input,
+		},
+		Timeout: sdk.Int(300),
+	})
 	elapsed := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("runsync request failed: %v", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read runsync response: %v", err)
+	// Check for SDK-level errors
+	if output.Error != nil && *output.Error != "" {
+		return nil, fmt.Errorf("runpod job failed: %s", *output.Error)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("runsync returned status %s: %s", resp.Status, string(body))
+	// Build our typed response from the SDK's generic output
+	job := &RunPodJobResponse{}
+	if output.Id != nil {
+		job.ID = *output.Id
+	}
+	if output.Status != nil {
+		job.Status = *output.Status
+	}
+	if output.DelayTime != nil {
+		job.DelayTime = int64(*output.DelayTime)
+	}
+	if output.ExecutionTime != nil {
+		job.ExecutionTime = int64(*output.ExecutionTime)
 	}
 
-	var job RunPodJobResponse
-	if err := json.Unmarshal(body, &job); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal runsync response: %v, body: %s", err, string(body))
+	// Parse the generic output into our typed struct.
+	// The SDK returns Output as *interface{}, so we marshal it back to JSON
+	// then decode into our known output shape.
+	if output.Output != nil {
+		outputJSON, err := json.Marshal(*output.Output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SDK output: %v", err)
+		}
+		if err := json.Unmarshal(outputJSON, &job.Output); err != nil {
+			return nil, fmt.Errorf("failed to parse job output: %v, raw: %s", err, string(outputJSON))
+		}
 	}
 
 	switch job.Status {
@@ -165,12 +183,86 @@ func RunRunPodJobSync(ctx context.Context, key, endpointID string, input map[str
 		if statusCallback != nil {
 			statusCallback("completed", "Processing complete", elapsed)
 		}
-		return &job, nil
+		return job, nil
 	case "FAILED":
-		return nil, fmt.Errorf("runpod job failed: %s", job.Error)
+		errMsg := job.Error
+		if errMsg == "" {
+			errMsg = "unknown error"
+		}
+		return nil, fmt.Errorf("runpod job failed: %s", errMsg)
 	default:
 		return nil, fmt.Errorf("runsync returned unexpected status: %s", job.Status)
 	}
+}
+
+// GetRunPodJobStatus checks the status of a RunPod job using the Go SDK.
+func GetRunPodJobStatus(key, endpointID, jobID string) (*RunPodJobResponse, error) {
+	ep, err := NewRunPodEndpointClient(key, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RunPod endpoint client: %v", err)
+	}
+
+	output, err := ep.Status(&rpEndpoint.StatusInput{
+		Id:             sdk.String(jobID),
+		RequestTimeout: sdk.Int(10),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("status request failed: %v", err)
+	}
+
+	job := &RunPodJobResponse{}
+	if output.Id != nil {
+		job.ID = *output.Id
+	}
+	if output.Status != nil {
+		job.Status = *output.Status
+	}
+	if output.DelayTime != nil {
+		job.DelayTime = int64(*output.DelayTime)
+	}
+	if output.ExecutionTime != nil {
+		job.ExecutionTime = int64(*output.ExecutionTime)
+	}
+	if output.Error != nil {
+		job.Error = *output.Error
+	}
+
+	if output.Output != nil {
+		outputJSON, err := json.Marshal(*output.Output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SDK output: %v", err)
+		}
+		if err := json.Unmarshal(outputJSON, &job.Output); err != nil {
+			return nil, fmt.Errorf("failed to parse job output: %v", err)
+		}
+	}
+
+	return job, nil
+}
+
+// CancelRunPodJob cancels a RunPod job using the Go SDK.
+func CancelRunPodJob(key, endpointID, jobID string) error {
+	ep, err := NewRunPodEndpointClient(key, endpointID)
+	if err != nil {
+		return fmt.Errorf("failed to create RunPod endpoint client: %v", err)
+	}
+
+	_, err = ep.Cancel(&rpEndpoint.CancelInput{
+		Id: sdk.String(jobID),
+	})
+	return err
+}
+
+// GetRunPodEndpointHealth retrieves health information for a RunPod endpoint using the Go SDK.
+func GetRunPodEndpointHealth(key, endpointID string) (*rpEndpoint.HealthOutput, error) {
+	ep, err := NewRunPodEndpointClient(key, endpointID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RunPod endpoint client: %v", err)
+	}
+
+	return ep.Health(&rpEndpoint.HealthInput{
+		RequestTimeout: sdk.Int(10),
+	})
 }
 
 type RunPodEndpoint struct {
