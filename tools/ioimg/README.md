@@ -80,6 +80,42 @@ ioimg upscale -i photos/ -p runpod
 ioimg upscale -i photos/ -r -p runpod --json
 ```
 
+#### Metrics
+
+After processing, a summary table is displayed:
+
+```
+┌──────────────┬──────────────┐
+│    METRIC    │    VALUE     │
+├──────────────┼──────────────┤
+│ Total Files  │ 6            │
+│ Succeeded    │ 5            │
+│ Failed       │ 1            │
+│ Total Time   │ 42.310s      │
+│ Billed Time  │ 18.600s      │
+│ Avg Time/Img │ 3.720s       │
+│ Total Cost   │ $0.0038      │
+│ Avg Cost/Img │ $0.0008      │
+│ Input Size   │ 2.45 MB      │
+│ Output Size  │ 38.12 MB     │
+└──────────────┴──────────────┘
+```
+
+| Metric | Description |
+|--------|-------------|
+| **Total Files** | Number of images found to process |
+| **Succeeded** | Images upscaled successfully |
+| **Failed** | Images that failed (errors listed below the table) |
+| **Total Time** | Wall-clock time from start to finish, including network overhead |
+| **Billed Time** | Sum of GPU execution time reported by the provider (what you pay for) |
+| **Avg Time/Img** | Average billed time per successful image (`Billed Time / Succeeded`) |
+| **Total Cost** | Estimated total cost based on billed time × provider rate |
+| **Avg Cost/Img** | Average cost per successful image (`Total Cost / Succeeded`) |
+| **Input Size** | Combined size of all input files |
+| **Output Size** | Combined size of all output files |
+
+Use `--json` to get the same metrics in machine-readable JSON format.
+
 ### `ioimg upscale init`
 
 Provision cloud infrastructure for upscaling.

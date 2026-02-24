@@ -406,8 +406,8 @@ func displayMetrics(m *batchMetrics) {
 		avgTime := time.Duration(0)
 		avgCost := 0.0
 		if m.Success > 0 {
-			avgTime = m.TotalTime / time.Duration(m.TotalFiles)
-			avgCost = m.TotalCost / float64(m.TotalFiles)
+			avgTime = m.TotalBilledTime / time.Duration(m.Success)
+			avgCost = m.TotalCost / float64(m.Success)
 		}
 
 		files := []map[string]interface{}{}
@@ -450,8 +450,8 @@ func displayMetrics(m *batchMetrics) {
 	avgTime := time.Duration(0)
 	avgCost := 0.0
 	if m.Success > 0 {
-		avgTime = m.TotalTime / time.Duration(m.TotalFiles)
-		avgCost = m.TotalCost / float64(m.TotalFiles)
+		avgTime = m.TotalBilledTime / time.Duration(m.Success)
+		avgCost = m.TotalCost / float64(m.Success)
 	}
 
 	data := [][]string{
