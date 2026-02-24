@@ -377,6 +377,9 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	}
 
 	displayMetrics(metrics)
+	if metrics.Failure > 0 {
+		return fmt.Errorf("%d file(s) failed to process", metrics.Failure)
+	}
 	return nil
 }
 
