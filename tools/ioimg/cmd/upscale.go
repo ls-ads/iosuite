@@ -20,6 +20,8 @@ var (
 	apiKey          string
 	model           string
 	jsonOutput      bool
+	outputFormat    string
+	recursive       bool
 )
 
 type batchMetrics struct {
@@ -47,8 +49,27 @@ var upscaleCmd = &cobra.Command{
 	Short:        "Upscale images using local or remote providers",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if input == "" || output == "" {
-			return fmt.Errorf("input and output are required")
+		if input == "" {
+			return fmt.Errorf("input is required")
+		}
+
+		// Derive output if not specified
+		if output == "" {
+			info, err := os.Stat(input)
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				output = strings.TrimRight(input, string(filepath.Separator)) + "_out"
+			} else {
+				ext := filepath.Ext(input)
+				output = strings.TrimSuffix(input, ext) + "_out" + ext
+			}
+		}
+
+		// Validate --format if explicitly set
+		if outputFormat != "" && outputFormat != "jpg" && outputFormat != "png" {
+			return fmt.Errorf("unsupported output format: %s (must be jpg or png)", outputFormat)
 		}
 
 		config := iocore.UpscaleConfig{
@@ -141,8 +162,9 @@ var upscaleProviderListCmd = &cobra.Command{
 }
 
 type upscaleJob struct {
-	src string
-	dst string
+	src    string
+	dst    string
+	format string
 }
 
 func processPath(src, dst string, config *iocore.UpscaleConfig) error {
@@ -156,40 +178,80 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 	isBatch := info.IsDir()
 
 	if isBatch {
-		err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-			if !isImage(path) {
-				return nil
-			}
+		if recursive {
+			err := filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					return nil
+				}
+				if !isImage(path) {
+					return nil
+				}
 
-			rel, err := filepath.Rel(src, path)
+				rel, err := filepath.Rel(src, path)
+				if err != nil {
+					return err
+				}
+				outPath := filepath.Join(dst, rel)
+
+				// Resolve format and rename extension
+				fmt_, err := resolveOutputFormat(path, outputFormat)
+				if err != nil {
+					return nil // skip unsupported format silently
+				}
+				outPath = changeExt(outPath, "."+fmt_)
+
+				jobs = append(jobs, upscaleJob{src: path, dst: outPath, format: fmt_})
+				return nil
+			})
 			if err != nil {
 				return err
 			}
-			jobs = append(jobs, upscaleJob{
-				src: path,
-				dst: filepath.Join(dst, rel),
-			})
-			return nil
-		})
-		if err != nil {
-			return err
+		} else {
+			entries, err := os.ReadDir(src)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				path := filepath.Join(src, entry.Name())
+				if !isImage(path) {
+					continue
+				}
+
+				outPath := filepath.Join(dst, entry.Name())
+
+				fmt_, err := resolveOutputFormat(path, outputFormat)
+				if err != nil {
+					continue // skip unsupported format silently
+				}
+				outPath = changeExt(outPath, "."+fmt_)
+
+				jobs = append(jobs, upscaleJob{src: path, dst: outPath, format: fmt_})
+			}
 		}
 	} else {
 		if !isImage(src) {
 			return fmt.Errorf("input file is not a supported image: %s", src)
 		}
+
+		fmt_, err := resolveOutputFormat(src, outputFormat)
+		if err != nil {
+			return err
+		}
+
 		target := dst
 		dstInfo, err := os.Stat(dst)
 		if err == nil && dstInfo.IsDir() {
 			target = filepath.Join(dst, filepath.Base(src))
 		}
-		jobs = append(jobs, upscaleJob{src: src, dst: target})
+		target = changeExt(target, "."+fmt_)
+
+		jobs = append(jobs, upscaleJob{src: src, dst: target, format: fmt_})
 	}
 
 	if len(jobs) == 0 {
@@ -249,6 +311,7 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		var err error
 
 		start := time.Now()
+		config.OutputFormat = job.format
 		inSize, outSize, activeDuration, err = upscaleFile(job.src, job.dst, upscaler)
 		wallDuration = time.Since(start)
 
@@ -434,10 +497,34 @@ func formatBytes(b int64) string {
 func isImage(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".bmp":
+	case ".jpg", ".jpeg", ".png":
 		return true
 	}
 	return false
+}
+
+// resolveOutputFormat determines the output format for a given input file.
+// If flagFormat is set, it takes precedence. Otherwise, the format is derived
+// from the input file extension.
+func resolveOutputFormat(inputPath, flagFormat string) (string, error) {
+	if flagFormat != "" {
+		return flagFormat, nil
+	}
+	ext := strings.ToLower(filepath.Ext(inputPath))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "jpg", nil
+	case ".png":
+		return "png", nil
+	default:
+		return "", fmt.Errorf("unsupported image format: %s", ext)
+	}
+}
+
+// changeExt replaces the file extension of path with newExt (e.g. ".png").
+func changeExt(path, newExt string) string {
+	ext := filepath.Ext(path)
+	return strings.TrimSuffix(path, ext) + newExt
 }
 
 func init() {
@@ -445,6 +532,8 @@ func init() {
 	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
 	upscaleCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
+	upscaleCmd.Flags().StringVarP(&outputFormat, "format", "f", "", "Output format: jpg or png (default: match input)")
+	upscaleCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Recursively process subdirectories")
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")

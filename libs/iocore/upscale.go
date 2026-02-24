@@ -41,6 +41,7 @@ type UpscaleConfig struct {
 	Provider       UpscaleProvider
 	APIKey         string
 	Model          string                   // Model name (e.g., "real-esrgan")
+	OutputFormat   string                   // Output format: "jpg" or "png"
 	StatusCallback func(RunPodStatusUpdate) // Optional callback for progress updates
 }
 
@@ -111,7 +112,11 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 	}
 
 	// Both local and runpod implementations now assume scale 4 for realism & consistency
-	cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan", "-i", "-", "-o", "-", "-s", "4")
+	args := []string{"-i", "-", "-o", "-", "-s", "4"}
+	if u.config.OutputFormat != "" {
+		args = append(args, "-f", u.config.OutputFormat)
+	}
+	cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan", args...)
 	cmd.Stdin = r
 	cmd.Stdout = w
 
@@ -224,9 +229,13 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	// 2. Submit via /runsync — blocks until result is ready, zero polling overhead
-	job, err := RunRunPodJobSync(ctx, key, u.endpointID, map[string]interface{}{
+	inputPayload := map[string]interface{}{
 		"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
-	}, u.emitStatus)
+	}
+	if u.config.OutputFormat != "" {
+		inputPayload["output_format"] = u.config.OutputFormat
+	}
+	job, err := RunRunPodJobSync(ctx, key, u.endpointID, inputPayload, u.emitStatus)
 	if err != nil {
 		return 0, err
 	}
