@@ -25,7 +25,32 @@ var (
 	overwrite       bool
 	continueOnError bool
 	activeWorkers   bool
+	region          string
 )
+
+// regionToDataCenterIDs maps simplified region names to RunPod data center IDs.
+// Returns nil for "all" so that the API default (all regions) is used.
+func regionToDataCenterIDs(region string) ([]string, error) {
+	switch strings.ToLower(region) {
+	case "all", "":
+		return nil, nil
+	case "us":
+		return []string{
+			"US-IL-1", "US-TX-1", "US-TX-3", "US-TX-4",
+			"US-GA-1", "US-GA-2", "US-KS-2", "US-KS-3",
+			"US-WA-1", "US-CA-2", "US-NC-1", "US-DE-1",
+		}, nil
+	case "eu":
+		return []string{
+			"EU-RO-1", "EU-SE-1", "EU-CZ-1", "EU-NL-1", "EU-FR-1",
+			"EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1",
+		}, nil
+	case "ca":
+		return []string{"CA-MTL-1", "CA-MTL-2", "CA-MTL-3"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported region: %s (valid: us, eu, ca, all)", region)
+	}
+}
 
 type batchMetrics struct {
 	TotalFiles      int
@@ -129,14 +154,27 @@ var upscaleInitCmd = &cobra.Command{
 		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
+		dataCenterIDs, err := regionToDataCenterIDs(region)
+		if err != nil {
+			return err
+		}
+
 		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
-			Name:        endpointName,
-			TemplateID:  "047z8w5i69",
-			GPUTypeIDs:  []string{"NVIDIA RTX A4000"}, // 16GB tier
-			WorkersMin:  workersMin,
-			WorkersMax:  1,
-			IdleTimeout: 5,
-			Flashboot:   true,
+			Name:       endpointName,
+			TemplateID: "047z8w5i69",
+			GPUTypeIDs: []string{
+				"NVIDIA RTX A4000",
+				"NVIDIA RTX A4500",
+				"NVIDIA RTX 4000 Ada Generation",
+				"NVIDIA RTX 4000 SFF Ada Generation",
+				"NVIDIA RTX 2000 Ada Generation",
+				"NVIDIA RTX A2000",
+			},
+			DataCenterIDs: dataCenterIDs,
+			WorkersMin:    workersMin,
+			WorkersMax:    1,
+			IdleTimeout:   5,
+			Flashboot:     true,
 		})
 
 		if err != nil {
@@ -596,6 +634,7 @@ func init() {
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
 	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
+	upscaleInitCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)

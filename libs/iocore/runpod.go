@@ -17,13 +17,14 @@ import (
 
 // RunPodEndpointConfig holds configuration for auto-provisioning a RunPod Serverless Endpoint.
 type RunPodEndpointConfig struct {
-	Name        string   `json:"name"`
-	TemplateID  string   `json:"templateId"`
-	GPUTypeIDs  []string `json:"gpuTypeIds"`
-	WorkersMin  int      `json:"workersMin"`
-	WorkersMax  int      `json:"workersMax"`
-	IdleTimeout int      `json:"idleTimeout"`
-	Flashboot   bool     `json:"flashboot"`
+	Name          string   `json:"name"`
+	TemplateID    string   `json:"templateId"`
+	GPUTypeIDs    []string `json:"gpuTypeIds"`
+	DataCenterIDs []string `json:"dataCenterIds,omitempty"`
+	WorkersMin    int      `json:"workersMin"`
+	WorkersMax    int      `json:"workersMax"`
+	IdleTimeout   int      `json:"idleTimeout"`
+	Flashboot     bool     `json:"flashboot"`
 }
 
 // EnsureRunPodEndpoint checks if a RunPod endpoint with the given name prefix exists.
