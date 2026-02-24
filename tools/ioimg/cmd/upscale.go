@@ -26,6 +26,7 @@ var (
 	continueOnError bool
 	activeWorkers   bool
 	region          string
+	gpuType         string
 )
 
 // regionToDataCenterIDs maps simplified region names to RunPod data center IDs.
@@ -159,17 +160,22 @@ var upscaleInitCmd = &cobra.Command{
 			return err
 		}
 
+		gpuIDs := []string{
+			"NVIDIA RTX A4000",
+			"NVIDIA RTX A4500",
+			"NVIDIA RTX 4000 Ada Generation",
+			"NVIDIA RTX 4000 SFF Ada Generation",
+			"NVIDIA RTX 2000 Ada Generation",
+			"NVIDIA RTX A2000",
+		}
+		if gpuType != "" {
+			gpuIDs = []string{gpuType}
+		}
+
 		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
-			Name:       endpointName,
-			TemplateID: "047z8w5i69",
-			GPUTypeIDs: []string{
-				"NVIDIA RTX A4000",
-				"NVIDIA RTX A4500",
-				"NVIDIA RTX 4000 Ada Generation",
-				"NVIDIA RTX 4000 SFF Ada Generation",
-				"NVIDIA RTX 2000 Ada Generation",
-				"NVIDIA RTX A2000",
-			},
+			Name:          endpointName,
+			TemplateID:    "047z8w5i69",
+			GPUTypeIDs:    gpuIDs,
 			DataCenterIDs: dataCenterIDs,
 			WorkersMin:    workersMin,
 			WorkersMax:    1,
@@ -219,6 +225,31 @@ var upscaleProviderListCmd = &cobra.Command{
 		table.Append("replicate", "Cloud API", "Yes (REPLICATE_API_KEY)")
 		table.Append("runpod", "Cloud API", "Yes (RUNPOD_API_KEY)")
 		table.Render()
+	},
+}
+
+var upscaleProviderGPUListCmd = &cobra.Command{
+	Use:   "gpus [provider]",
+	Short: "List available GPUs for a specific provider (e.g. runpod)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		provider := "runpod"
+		if len(args) > 0 {
+			provider = args[0]
+		}
+
+		if provider != "runpod" {
+			return fmt.Errorf("provider '%s' does not support GPU listing or initialization", provider)
+		}
+
+		fmt.Printf("Available GPUs for RunPod:\n\n")
+		table := tablewriter.NewTable(os.Stdout,
+			tablewriter.WithHeader([]string{"GPU Type"}),
+		)
+		for _, gpu := range iocore.RunPodAvailableGPUs {
+			table.Append([]string{gpu})
+		}
+		table.Render()
+		return nil
 	},
 }
 
@@ -636,9 +667,11 @@ func init() {
 	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
 	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
 	upscaleInitCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	upscaleInitCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)
+	upscaleProviderCmd.AddCommand(upscaleProviderGPUListCmd)
 	upscaleCmd.AddCommand(upscaleInitCmd)
 	upscaleCmd.AddCommand(upscaleModelCmd)
 	upscaleCmd.AddCommand(upscaleProviderCmd)

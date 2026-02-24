@@ -159,8 +159,8 @@ Provision cloud infrastructure for upscaling. Currently supports RunPod.
 # Initialize a RunPod endpoint (flex, all regions)
 ioimg upscale init -p runpod
 
-# Always-active endpoint in the US
-ioimg upscale init -p runpod --active --region us
+# Always-active endpoint in the US with a specific GPU
+ioimg upscale init -p runpod --active --region us --gpu "NVIDIA RTX A5000"
 ```
 
 | Flag | Default | Description |
@@ -170,6 +170,7 @@ ioimg upscale init -p runpod --active --region us
 | `--model` / `-m` | `real-esrgan` | Model to provision |
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
 | `--region` | `all` | Region constraint: `us`, `eu`, `ca`, or `all` |
+| `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
 
 If an endpoint for the model already exists, the command reports it and exits without creating a duplicate.
 
@@ -186,14 +187,25 @@ The `delayTime` field from RunPod captures platform-side queue and cold-start wa
 
 #### Supported GPUs
 
-Endpoints are configured to use the following GPU types (in priority order):
+By default, endpoints are configured with a prioritized list of efficient 16GB GPUs:
 
-- NVIDIA RTX A4000
-- NVIDIA RTX A4500
-- NVIDIA RTX 4000 Ada Generation
-- NVIDIA RTX 4000 SFF Ada Generation
-- NVIDIA RTX 2000 Ada Generation
-- NVIDIA RTX A2000
+1. NVIDIA RTX A4000 (Default)
+2. NVIDIA RTX A4500
+3. NVIDIA RTX 4000 Ada Generation
+4. NVIDIA RTX 4000 SFF Ada Generation
+5. NVIDIA RTX 2000 Ada Generation
+6. NVIDIA RTX A2000
+
+You can override this and specify any valid RunPod GPU type using the `--gpu` flag. Valid options include `NVIDIA GeForce RTX 4090`, `NVIDIA A100-SXM4-80GB`, `NVIDIA H100 PCIe`, `NVIDIA B200`, etc.
+
+### `ioimg upscale provider gpus [provider]`
+
+List available GPUs for a specific provider. This is useful for finding the correct GPU name to use with `upscale init --gpu`.
+
+```bash
+# List all available GPUs for RunPod
+ioimg upscale provider gpus runpod
+```
 
 ### `ioimg upscale model list`
 
