@@ -175,6 +175,15 @@ If an endpoint for the model already exists, the command reports it and exits wi
 
 **Active vs Flex pricing**: Active endpoints have a lower per-second rate but you pay for the always-on worker even when idle. Flex endpoints scale to zero but have a higher per-second rate and cold-start latency.
 
+For **Flex workers**, billing covers three periods:
+1. **Start time**: Worker initialization and model loading (cold starts).
+2. **Execution time**: The actual processing of the request.
+3. **Idle time**: Time the worker stays active after completing a request before scaling down.
+
+All three are billed per second (rounded up to the next full second). The `Processing Time` reported by `ioimg` corresponds to the **Execution time** portion. While this is the dominant cost for sequential jobs on a warm worker, the actual amount billed by RunPod may be slightly higher if cold starts or idle periods are incurred.
+
+The `delayTime` field from RunPod captures platform-side queue and cold-start wait, which is a close approximation of the billed start time. In practice, `executionTime` is the core billing metric for flex; it just slightly underestimates total cost when cold starts are involved.
+
 #### Supported GPUs
 
 Endpoints are configured to use the following GPU types (in priority order):
