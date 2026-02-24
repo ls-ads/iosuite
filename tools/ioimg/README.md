@@ -21,6 +21,7 @@ ioimg upscale -i <input> [flags]
 | `--format` | `-f` | match input | Output format: `jpg` or `png` |
 | `--recursive` | `-r` | `false` | Recursively process subdirectories |
 | `--overwrite` | | `false` | Reprocess all files even if output already exists |
+| `--continue-on-error` | `-c` | `false` | Continue processing remaining files after a failure |
 | `--provider` | `-p` | `local` | Upscale provider (`local`, `replicate`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
 | `--model` | `-m` | `real-esrgan` | Upscale model |
@@ -78,6 +79,22 @@ ioimg upscale -i photos/ -p runpod
 
 # Force reprocessing of everything
 ioimg upscale -i photos/ -p runpod --overwrite
+```
+
+#### Error Handling
+
+Batch processing **stops on the first error** by default. There is no automatic retry — failures are typically caused by the input file itself (e.g. corrupt or unsupported content), so retrying the same file would produce the same result.
+
+Because the command is idempotent, you can fix or remove the problematic file and re-run the same command to continue where you left off.
+
+To process all files regardless of individual failures, use `--continue-on-error`:
+
+```bash
+# Stop on first error (default)
+ioimg upscale -i photos/ -p runpod
+
+# Keep going even if some files fail
+ioimg upscale -i photos/ -p runpod --continue-on-error
 ```
 
 #### Examples

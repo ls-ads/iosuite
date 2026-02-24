@@ -23,6 +23,7 @@ var (
 	outputFormat    string
 	recursive       bool
 	overwrite       bool
+	continueOnError bool
 )
 
 type batchMetrics struct {
@@ -347,6 +348,15 @@ func processPath(src, dst string, config *iocore.UpscaleConfig) error {
 		if err != nil {
 			metric.Error = err.Error()
 			metrics.Failure++
+			if !continueOnError {
+				metrics.Files = append(metrics.Files, metric)
+				metrics.TotalTime = time.Since(startAll)
+				if bar != nil {
+					bar.Clear()
+				}
+				displayMetrics(metrics)
+				return fmt.Errorf("failed to process %s: %s", filepath.Base(job.src), err)
+			}
 		} else {
 			metrics.Success++
 			metrics.InputBytes += inSize
@@ -557,6 +567,7 @@ func init() {
 	upscaleCmd.Flags().StringVarP(&outputFormat, "format", "f", "", "Output format: jpg or png (default: match input)")
 	upscaleCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Recursively process subdirectories")
 	upscaleCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
+	upscaleCmd.Flags().BoolVarP(&continueOnError, "continue-on-error", "c", false, "Continue processing remaining files after a failure")
 
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
