@@ -24,6 +24,7 @@ var (
 	recursive       bool
 	overwrite       bool
 	continueOnError bool
+	activeWorkers   bool
 )
 
 type batchMetrics struct {
@@ -106,14 +107,33 @@ var upscaleInitCmd = &cobra.Command{
 
 		ctx := context.Background()
 		endpointName := iocore.GetRunPodEndpointName(model)
+
+		// Check if an endpoint for this model already exists
+		existing, err := iocore.GetRunPodEndpoints(ctx, key, endpointName)
+		if err != nil {
+			return fmt.Errorf("failed to check for existing endpoints: %v", err)
+		}
+		if len(existing) > 0 {
+			fmt.Printf("RunPod endpoint for model '%s' already exists:\n  Name: %s\n  ID:   %s\n", model, existing[0].Name, existing[0].ID)
+			return nil
+		}
+
+		workersMin := 0
+		if activeWorkers {
+			workersMin = 1
+		}
+
 		fmt.Printf("Provisioning RunPod endpoint '%s'...\n", endpointName)
+		if activeWorkers {
+			fmt.Println("Mode: always active (workersMin=1)")
+		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
 		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
 			Name:        endpointName,
 			TemplateID:  "047z8w5i69",
 			GPUTypeIDs:  []string{"NVIDIA RTX A4000"}, // 16GB tier
-			WorkersMin:  0,
+			WorkersMin:  workersMin,
 			WorkersMax:  1,
 			IdleTimeout: 5,
 			Flashboot:   true,
@@ -575,6 +595,7 @@ func init() {
 	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
 	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
+	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)
