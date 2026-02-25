@@ -27,6 +27,7 @@ var (
 	activeWorkers   bool
 	region          string
 	gpuType         string
+	dataCenter      string
 )
 
 // regionToDataCenterIDs maps simplified region names to RunPod data center IDs.
@@ -158,6 +159,11 @@ var upscaleInitCmd = &cobra.Command{
 		dataCenterIDs, err := regionToDataCenterIDs(region)
 		if err != nil {
 			return err
+		}
+
+		// Explicit datacenter flag overrides region
+		if dataCenter != "" {
+			dataCenterIDs = []string{dataCenter}
 		}
 
 		gpuIDs := []string{
@@ -668,6 +674,7 @@ func init() {
 	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
 	upscaleInitCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
 	upscaleInitCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
+	upscaleInitCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)
