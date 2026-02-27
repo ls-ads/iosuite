@@ -312,6 +312,8 @@ ioimg combine -i ./frames/frame_%05d.png -o output.mp4 --fps 30
 
 Display a feature matrix of all commands and their supported providers (`local_cpu`, `local_gpu`, `runpod`, `replicate`).
 
+For full cross-platform installation instructions, including shell autocompletion for Bash, Zsh, Fish, and PowerShell, please refer to the [Root Installation Guide](../../README.md#️-installation--shell-completion).
+
 ### `ioimg upscale model list`
 
 List available upscale models.

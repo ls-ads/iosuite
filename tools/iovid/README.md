@@ -72,6 +72,8 @@ iovid denoise -i input.mp4 -o output.mp4 --preset med
 iovid sharpen -i input.mp4 -o output.mp4 --amount 1.2
 ```
 
+For full cross-platform installation instructions, including shell autocompletion for Bash, Zsh, Fish, and PowerShell, please refer to the [Root Installation Guide](../../README.md#️-installation--shell-completion).
+
 ### Temporal & Stream Operations
 ```bash
 # Trim video

@@ -8,9 +8,10 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 ## 🚀 Quick Start (In 3 Commands)
 
-1. **Build CLI**: Compile the native Go binaries for your system.
+1. **Install CLI**: Download and set up the tools + autocompletions in one go.
    ```bash
-   make build
+   # Linux/macOS
+   curl -sSL https://raw.githubusercontent.com/ls-ads/iosuite/main/scripts/install.sh | bash
    ```
 
 2. **Provision Backend**: Initialize your local or cloud processing environment.
@@ -19,14 +20,40 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
    ./bin/ioimg install -m ffmpeg
    
    # Cloud: Automatic RunPod endpoint provisioning
-   ./bin/ioimg init -m ffmpeg -p runpod -k YOUR_API_KEY
+   ioimg start -m ffmpeg -p runpod -k YOUR_API_KEY
    ```
 
 3. **Process Media**: Start processing with hardware acceleration.
    ```bash
    # Upscale an image using local GPU
-   ./bin/ioimg upscale -i image.jpg -o output.jpg -p local_gpu
+   ioimg upscale -i image.jpg -o output.jpg -p local_gpu
    ```
+
+---
+
+## ⚙️ Installation & Shell Completion
+
+Get `ioimg` and `iovid` in your system path with full autocompletion (Bash, Zsh, Fish, PowerShell).
+
+### Linux & macOS
+```bash
+# Run the installation script (downloads v0.1.0 binaries)
+curl -sSL https://raw.githubusercontent.com/ls-ads/iosuite/main/scripts/install.sh | bash
+
+# Reload your shell
+source ~/.$(basename $SHELL)rc
+```
+
+### Windows (PowerShell)
+```powershell
+# Run the installation script (downloads v0.1.0 binaries)
+Invoke-RestMethod -Uri https://raw.githubusercontent.com/ls-ads/iosuite/main/scripts/install.ps1 | Invoke-Expression
+```
+
+> [!NOTE]
+> **Autocompletion**: The install scripts automatically add `source <(ioimg completion <shell>)` to your shell profile. Once installed, try typing `ioimg [TAB]` to see it in action!
+
+---
 
 ---
 
