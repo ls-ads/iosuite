@@ -27,30 +27,6 @@ var (
 	dataCenter      string
 )
 
-// regionToDataCenterIDs maps simplified region names to RunPod data center IDs.
-// Returns nil for "all" so that the API default (all regions) is used.
-func regionToDataCenterIDs(region string) ([]string, error) {
-	switch strings.ToLower(region) {
-	case "all", "":
-		return nil, nil
-	case "us":
-		return []string{
-			"US-IL-1", "US-TX-1", "US-TX-3", "US-TX-4",
-			"US-GA-1", "US-GA-2", "US-KS-2", "US-KS-3",
-			"US-WA-1", "US-CA-2", "US-NC-1", "US-DE-1",
-		}, nil
-	case "eu":
-		return []string{
-			"EU-RO-1", "EU-SE-1", "EU-CZ-1", "EU-NL-1", "EU-FR-1",
-			"EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1",
-		}, nil
-	case "ca":
-		return []string{"CA-MTL-1", "CA-MTL-2", "CA-MTL-3"}, nil
-	default:
-		return nil, fmt.Errorf("unsupported region: %s (valid: us, eu, ca, all)", region)
-	}
-}
-
 type batchMetrics struct {
 	TotalFiles      int
 	Skipped         int
@@ -138,35 +114,22 @@ var upscaleInitCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		endpointName := iocore.GetRunPodEndpointName(model)
-
-		// Check if an endpoint for this model already exists
-		existing, err := iocore.GetRunPodEndpoints(ctx, key, endpointName)
-		if err != nil {
-			return fmt.Errorf("failed to check for existing endpoints: %v", err)
-		}
-		if len(existing) > 0 {
-			fmt.Printf("RunPod endpoint for model '%s' already exists:\n  Name: %s\n  ID:   %s\n", model, existing[0].Name, existing[0].ID)
-			return nil
-		}
 
 		workersMin := 0
 		if activeWorkers {
 			workersMin = 1
 		}
 
-		fmt.Printf("Provisioning RunPod endpoint '%s'...\n", endpointName)
+		fmt.Printf("Initializing RunPod infrastructure for model '%s'...\n", model)
 		if activeWorkers {
 			fmt.Println("Mode: always active (workersMin=1)")
 		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
-		dataCenterIDs, err := regionToDataCenterIDs(region)
+		dataCenterIDs, err := iocore.RegionToDataCenterIDs(region)
 		if err != nil {
 			return err
 		}
-
-		// Explicit datacenter flag overrides region
 		if dataCenter != "" {
 			dataCenterIDs = []string{dataCenter}
 		}
@@ -183,19 +146,13 @@ var upscaleInitCmd = &cobra.Command{
 			gpuIDs = []string{gpuType}
 		}
 
-		endpointID, err := iocore.EnsureRunPodEndpoint(ctx, key, iocore.RunPodEndpointConfig{
-			Name:          endpointName,
-			TemplateID:    "047z8w5i69",
-			GPUTypeIDs:    gpuIDs,
-			DataCenterIDs: dataCenterIDs,
-			WorkersMin:    workersMin,
-			WorkersMax:    1,
-			IdleTimeout:   5,
-			Flashboot:     true,
-		})
+		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, iocore.ModelConfig{
+			TemplateID: "047z8w5i69",
+			GPUIDs:     gpuIDs,
+		}, dataCenterIDs, workersMin)
 
 		if err != nil {
-			return fmt.Errorf("failed to provision runpod endpoint: %v", err)
+			return fmt.Errorf("failed to initialize infrastructure: %v", err)
 		}
 
 		fmt.Printf("Successfully initialized RunPod endpoint!\nEndpoint ID: %s\n", endpointID)

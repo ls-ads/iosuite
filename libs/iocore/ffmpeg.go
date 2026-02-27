@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -89,11 +88,7 @@ func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string,
 	// Always overwrite
 	args = append(args, "-y", output)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Run(); err != nil {
+	if err := RunBinary(ctx, "ffmpeg", args, nil, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("ffmpeg failed (provider: %s): %v", provider, err)
 	}
 	return nil

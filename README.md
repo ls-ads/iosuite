@@ -2,7 +2,35 @@
 
 A high-performance, unified suite for image and video processing. Leveraging FFmpeg, local GPU acceleration (NCNN/Vulkan/CUDA), and serverless cloud providers (RunPod/Replicate).
 
-## Architecture
+`iosuite` is designed to be truly universal, providing bit-for-bit identical results across **Linux**, **Windows**, and **macOS** by standardizing on optimized backends like `ffmpeg-serve` and `real-esrgan-serve`.
+
+---
+
+## 🚀 Quick Start (In 3 Commands)
+
+1. **Build CLI**: Compile the native Go binaries for your system.
+   ```bash
+   make build
+   ```
+
+2. **Provision Backend**: Initialize your local or cloud processing environment.
+   ```bash
+   # Local: Install FFmpeg & Real-ESRGAN backends
+   ./bin/ioimg install -m ffmpeg
+   
+   # Cloud: Automatic RunPod endpoint provisioning
+   ./bin/ioimg init -m ffmpeg -p runpod -k YOUR_API_KEY
+   ```
+
+3. **Process Media**: Start processing with hardware acceleration.
+   ```bash
+   # Upscale an image using local GPU
+   ./bin/ioimg upscale -i image.jpg -o output.jpg -p local_gpu
+   ```
+
+---
+
+## 🏗️ Architecture
 
 `iosuite` is built on a modular, Go-native core designed for maximum portability and performance.
 
@@ -12,11 +40,14 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 - **`iovid`**: CLI tool for comprehensive video transformations and filters.
 - **`libiocore`**: A C-shared library bridge allowing the core logic to be imported by Python, Rust, or C++ applications.
 
+### Standardized Backends
+To ensure consistency across platforms, `iosuite` utilizes specialized wrappers:
+- **`ffmpeg-serve`**: The primary local FFmpeg engine, providing a standardized CLI and REST API.
+- **`real-esrgan-serve`**: A TensorRT-optimized bridge for ultra-fast AI upscaling on NVIDIA hardware.
+
 ---
 
-## Universal Compatibility
-
-`iosuite` is designed to be truly universal, supporting multiple operating systems and CPU architectures.
+## 🌍 Universal Compatibility
 
 | OS | Architectures | Accelerated By |
 | :--- | :--- | :--- |
@@ -25,77 +56,42 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 | **macOS** | Apple Silicon, Intel | VideoToolbox (Hardware) |
 
 ### Zero-Config Cross-Compilation
-The CLI tools (`ioimg`, `iovid`) are written in **pure Go** and avoid CGO dependencies. This allows them to be cross-compiled for any platform with a single command:
-
+The CLI tools are written in **pure Go** and avoid CGO dependencies.
 ```bash
-# Build for all supported platforms and architectures
+# Generate binaries for all platforms
 make build-all
 ```
 
-> [!IMPORTANT]
-> **CGO & Shared Libraries**: While the CLI tools are CGO-free, building the `libiocore` shared library (`.so`, `.dll`) **requires CGO** and a host C cross-compiler for the target platform. If you only need the CLI tools, you do not need to worry about C toolchains.
+---
+
+## 🧪 Verification & Testing
+
+We maintain a dual-layered testing strategy to ensure reliability:
+
+### 1. Unit Tests
+Fast verification of core library logic (validation, resolution, mapping).
+```bash
+go test ./libs/iocore
+```
+
+### 2. Integration Tests
+End-to-end "Smoke Tests" using standardized example assets.
+```bash
+./scripts/test_examples.sh
+```
+
+> [!TIP]
+> **Unified Testing**: Run `make test` to execute both suites in a single pass. If the example assets are missing, the script will automatically pull them from the latest GitHub release.
 
 ---
 
-## Installation & Setup
+## 🛠️ Discovery & Help
 
-Installation is a two-step process: First, install the **CLI tools** themselves; then, use those tools to provision the **processing models** (like FFmpeg).
-
-### 1. Install CLI Tools (`ioimg` & `iovid`)
-
-#### Option A: Download Pre-built Binaries (Recommended)
-Download the latest binary for your OS and architecture from the [GitHub Releases](https://github.com/ls-ads/iosuite/releases).
-- **Windows**: `ioimg-windows-amd64.exe`
-- **Linux**: `ioimg-linux-amd64`
-- **macOS (Apple Silicon)**: `ioimg-darwin-arm64`
-
-#### Option B: Build from Source
-If you have Go installed (1.25.5+), you can build the tools natively:
-```bash
-make build
-# Binaries will be located in the bin/ directory
-```
-
-### 2. Install Models & Backends
-Once the CLI is installed, use the `install` command to provision necessary dependencies (like `ffmpeg-serve`) for your platform:
-
-```bash
-# Automatically detects OS/Arch, downloads, and verifies checksums
-./bin/ioimg install -m ffmpeg
-```
-
----
-
-## Usage & Discovery
-
-### Feature Matrix
-Check which commands are supported by your local hardware (CPU/GPU) vs Cloud providers (RunPod/Replicate):
+Use the `list` command to explore supported features and provider compatibility for your specific hardware:
 
 ```bash
 ./bin/ioimg list
 ./bin/iovid list
-```
-
-### Basic Example: Upscaling
-```bash
-./bin/ioimg upscale -i image.jpg -o output.jpg -p local_gpu
-```
-
----
-
-## Build Instructions
-
-Requires Go 1.25.5+.
-
-```bash
-# Build native binaries for your current system
-make build
-
-# Run all tests
-make test
-
-# Generate universal release assets
-make build-all
 ```
 
 ## License

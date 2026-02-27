@@ -34,7 +34,10 @@ $(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY
 $(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY_TARGET,iovid,$(p),$(a)))))
 
 test:
-	go test ./...
+	@echo "🏃 Running Go Unit Tests (iocore)..."
+	go test ./libs/iocore
+	@echo "🏃 Running Integration Tests..."
+	./scripts/test_examples.sh
 
 clean:
 	rm -rf $(BIN_DIR)

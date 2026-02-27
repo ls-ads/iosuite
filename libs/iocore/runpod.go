@@ -15,6 +15,30 @@ import (
 	rpEndpoint "github.com/runpod/go-sdk/pkg/sdk/endpoint"
 )
 
+// RegionToDataCenterIDs maps simplified region names to RunPod data center IDs.
+// Returns nil for "all" so that the API default (all regions) is used.
+func RegionToDataCenterIDs(region string) ([]string, error) {
+	switch strings.ToLower(region) {
+	case "all", "":
+		return nil, nil
+	case "us":
+		return []string{
+			"US-IL-1", "US-TX-1", "US-TX-3", "US-TX-4",
+			"US-GA-1", "US-GA-2", "US-KS-2", "US-KS-3",
+			"US-WA-1", "US-CA-2", "US-NC-1", "US-DE-1",
+		}, nil
+	case "eu":
+		return []string{
+			"EU-RO-1", "EU-SE-1", "EU-CZ-1", "EU-NL-1", "EU-FR-1",
+			"EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1",
+		}, nil
+	case "ca":
+		return []string{"CA-MTL-1", "CA-MTL-2", "CA-MTL-3"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported region: %s (valid: us, eu, ca, all)", region)
+	}
+}
+
 // NetworkVolume represents a RunPod network volume.
 type NetworkVolume struct {
 	ID           string `json:"id"`
@@ -292,6 +316,53 @@ func GetRunPodEndpointHealth(key, endpointID string) (*rpEndpoint.HealthOutput, 
 	return ep.Health(&rpEndpoint.HealthInput{
 		RequestTimeout: sdk.Int(10),
 	})
+}
+
+func GetRunPodEndpointName(model string) string {
+	if model == "ffmpeg" {
+		return "iosuite-ffmpeg"
+	}
+	if model == "real-esrgan" || model == "" {
+		return "iosuite-img-real-esrgan"
+	}
+	return "iosuite-img-" + model
+}
+
+// ModelConfig holds the cloud configuration for a specific model.
+type ModelConfig struct {
+	TemplateID string
+	GPUIDs     []string
+}
+
+// ProvisionRunPodModel handles the end-to-end provisioning of a RunPod endpoint for a model.
+func ProvisionRunPodModel(ctx context.Context, key string, model string, modelCfg ModelConfig, dataCenterIDs []string, workersMin int) (string, error) {
+	endpointName := GetRunPodEndpointName(model)
+
+	// 1. Check if an endpoint for this model already exists
+	existing, err := GetRunPodEndpoints(ctx, key, endpointName)
+	if err != nil {
+		return "", fmt.Errorf("failed to check for existing endpoints: %v", err)
+	}
+	if len(existing) > 0 {
+		return existing[0].ID, nil
+	}
+
+	// 2. Provision new endpoint
+	endpointID, err := EnsureRunPodEndpoint(ctx, key, RunPodEndpointConfig{
+		Name:          endpointName,
+		TemplateID:    modelCfg.TemplateID,
+		GPUTypeIDs:    modelCfg.GPUIDs,
+		DataCenterIDs: dataCenterIDs,
+		WorkersMin:    workersMin,
+		WorkersMax:    1,
+		IdleTimeout:   5,
+		Flashboot:     true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to provision RunPod endpoint: %v", err)
+	}
+
+	return endpointID, nil
 }
 
 type RunPodEndpoint struct {

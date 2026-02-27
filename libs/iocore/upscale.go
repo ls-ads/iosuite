@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"time"
 )
@@ -24,15 +23,6 @@ const (
 )
 
 // GetRunPodEndpointName returns the endpoint name prefix for a given model
-func GetRunPodEndpointName(model string) string {
-	if model == "ffmpeg" {
-		return "iosuite-ffmpeg"
-	}
-	if model == "real-esrgan" || model == "" {
-		return "iosuite-img-real-esrgan"
-	}
-	return "iosuite-img-" + model
-}
 
 // RunPodStatusUpdate provides progress information during RunPod job execution.
 type RunPodStatusUpdate struct {
@@ -127,14 +117,9 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 	if u.config.OutputFormat != "" {
 		args = append(args, "-f", u.config.OutputFormat)
 	}
-	cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan", args...)
-	cmd.Stdin = r
-	cmd.Stdout = w
 
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := cmd.Run()
+	err := RunBinary(ctx, "realesrgan-ncnn-vulkan", args, r, w, &stderr)
 	if err != nil {
 		return 0, fmt.Errorf("local upscale failed: %v, stderr: %s", err, stderr.String())
 	}
@@ -335,14 +320,8 @@ func (u *ffmpegUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 
 	args = append(args, "-f", "image2", "-")
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
-	cmd.Stdin = r
-	cmd.Stdout = w
-
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := RunBinary(ctx, "ffmpeg", args, r, w, &stderr); err != nil {
 		return 0, fmt.Errorf("ffmpeg upscale failed: %v, stderr: %s", err, stderr.String())
 	}
 
