@@ -13,12 +13,12 @@ import (
 )
 
 var ffmpegServeChecksums = map[string]string{
-	"darwin-amd64":  "1b0395187311ca670dace6a9507d11e387a4fa15d2ea866825e7e69268638ff3",
-	"darwin-arm64":  "9b202b93871b596fc62c74cd19b7054a6de77482d5cb3219f97964ae4d354b64",
-	"linux-amd64":   "cfc6d2d437512cd77c48f71a52cd6e25c081888d8d15dd543575051f02e5b089",
-	"linux-arm64":   "749309598882d0109efe417c30ac59c6fdd8fbc3d48ac2a0781514ded42b8693",
-	"windows-amd64": "d88b163e4163291768dca3360d4e2097bb3bd9814a90bcb6cf6aaac3ae77f0ef",
-	"windows-arm64": "7d1b1757993e9cb12da489eab03e3d819167ec1271afd0aed1d36e40ff0297f8",
+	"darwin-amd64":  "4d258ae65d42b39a7b354aacc81fe9c17c12b7f905003266e7a7e8ab6a0e43e5",
+	"darwin-arm64":  "1a57dcafc2641344b7002ed2787410f9dba43551151de102fa58a73eb01d5f69",
+	"linux-amd64":   "8326a66984420895e5dfba07bd73eeb8752c15a8d3f7627f312761e7cec8a7e0",
+	"linux-arm64":   "8abd560c6db4d1cc5d62067b9b862af9121fdf3a4e9d57fbc0bd0cdd7834f42b",
+	"windows-amd64": "15df0746fb9c668790a6fdd2840d3145bd4576424220ce74a4c475546b55b0ad",
+	"windows-arm64": "8ff36441b6fa8b0425c5bcc9aaceb180b6f04c304000b73ac7a85710c9e2f9c1",
 }
 
 // InstallModel downloads and installs a supported model/binary for the current platform.
