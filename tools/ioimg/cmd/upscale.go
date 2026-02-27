@@ -16,9 +16,6 @@ import (
 )
 
 var (
-	upscaleProvider string
-	apiKey          string
-	model           string
 	jsonOutput      bool
 	outputFormat    string
 	recursive       bool
@@ -80,6 +77,14 @@ var upscaleCmd = &cobra.Command{
 	Short:        "Upscale images using local or remote providers",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// If the user didn't specify a model, root default is "ffmpeg".
+		// For the upscale command, we want "real-esrgan" to be the default AI model.
+		// However, we now support "ffmpeg" as a valid model for upscaling too!
+		// To distinguish, we check if the flag was changed.
+		if !cmd.Flags().Changed("model") && model == "ffmpeg" {
+			model = "real-esrgan"
+		}
+
 		if input == "" {
 			return fmt.Errorf("input is required")
 		}
@@ -104,7 +109,7 @@ var upscaleCmd = &cobra.Command{
 		}
 
 		config := iocore.UpscaleConfig{
-			Provider: iocore.UpscaleProvider(upscaleProvider),
+			Provider: iocore.UpscaleProvider(provider),
 			APIKey:   apiKey,
 			Model:    model,
 		}
@@ -117,10 +122,10 @@ var upscaleInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize and provision required infrastructure for the upscaler",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		provider := iocore.UpscaleProvider(upscaleProvider)
+		providerTyped := iocore.UpscaleProvider(provider)
 
-		if provider != iocore.ProviderRunPod {
-			fmt.Printf("Initialization is not required for provider: %s\n", provider)
+		if providerTyped != iocore.ProviderRunPod {
+			fmt.Printf("Initialization is not required for provider: %s\n", providerTyped)
 			return nil
 		}
 
@@ -227,7 +232,7 @@ var upscaleProviderListCmd = &cobra.Command{
 		table := tablewriter.NewTable(os.Stdout,
 			tablewriter.WithHeader([]string{"Provider", "Type", "Requires API Key"}),
 		)
-		table.Append("local", "Local GPU (ncnn-vulkan)", "No")
+		table.Append([]string{"local_gpu", "Local GPU (ncnn-vulkan)", "No"})
 		table.Append("replicate", "Cloud API", "Yes (REPLICATE_API_KEY)")
 		table.Append("runpod", "Cloud API", "Yes (RUNPOD_API_KEY)")
 		table.Render()
@@ -659,18 +664,15 @@ func changeExt(path, newExt string) string {
 }
 
 func init() {
-	upscaleCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
-	upscaleCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
-	upscaleCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
+	// These flags are now persistent on rootCmd, but keeping them here for 'upscale' command specifically if needed?
+	// Actually, best to remove them or at least not redeclare variables.
 	upscaleCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 	upscaleCmd.Flags().StringVarP(&outputFormat, "format", "f", "", "Output format: jpg or png (default: match input)")
 	upscaleCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Recursively process subdirectories")
 	upscaleCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
 	upscaleCmd.Flags().BoolVarP(&continueOnError, "continue-on-error", "c", false, "Continue processing remaining files after a failure")
 
-	upscaleInitCmd.Flags().StringVarP(&upscaleProvider, "provider", "p", "local", "Upscale provider")
-	upscaleInitCmd.Flags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
-	upscaleInitCmd.Flags().StringVarP(&model, "model", "m", "real-esrgan", "Upscale model")
+	// Redefine default model for upscale specifically if needed, otherwise skip
 	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
 	upscaleInitCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
 	upscaleInitCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")

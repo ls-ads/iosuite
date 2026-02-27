@@ -22,9 +22,9 @@ ioimg upscale -i <input> [flags]
 | `--recursive` | `-r` | `false` | Recursively process subdirectories |
 | `--overwrite` | | `false` | Reprocess all files even if output already exists |
 | `--continue-on-error` | `-c` | `false` | Continue processing remaining files after a failure |
-| `--provider` | `-p` | `local` | Upscale provider (`local`, `replicate`, `runpod`) |
+| `--provider` | `-p` | `local_gpu` | Execution provider (`local_cpu`, `local_gpu`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
-| `--model` | `-m` | `real-esrgan` | Upscale model |
+| `--model` | `-m` | `real-esrgan` | Upscale model (or `ffmpeg`) |
 | `--json` | | `false` | Output metrics as JSON |
 
 #### Output Path
@@ -165,7 +165,7 @@ ioimg upscale init -p runpod --active --region us --gpu "NVIDIA RTX A5000"
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` / `-p` | `local` | Provider to initialize |
+| `--provider` / `-p` | `local_gpu` | Provider to initialize |
 | `--api-key` / `-k` | | API key (or set `RUNPOD_API_KEY`) |
 | `--model` / `-m` | `real-esrgan` | Model to provision |
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
@@ -206,6 +206,93 @@ List available GPUs for a specific provider. This is useful for finding the corr
 # List all available GPUs for RunPod
 ioimg upscale provider gpus runpod
 ```
+
+### `ioimg runpod volume`
+
+Manage RunPod network volumes for large media handling.
+
+```bash
+# Create a 100GB volume in EU-RO-1
+ioimg runpod volume create --name my-media --size 100 --region EU-RO-1
+
+# List all volumes
+ioimg runpod volume list
+
+# Delete a volume
+ioimg runpod volume delete --id <volume-id>
+```
+
+### Transformation Verbs
+
+Atomic image transformations and bridge commands using FFmpeg.
+
+- **Geometric**: `scale`, `crop`, `rotate`, `flip`, `pad`.
+- **Visual**: `brighten`, `contrast`, `saturate`, `denoise`, `sharpen`.
+- **Bridge**: `combine` (images to video).
+- **Control**: `pipeline` (chained execution).
+
+All transformation verbs support the global `--provider` flag, allowing you to run them locally on CPU/GPU or remotely on RunPod.
+
+### `ioimg pipeline`
+
+Run multiple transformations chained together in a single execution pass. This is highly optimized for GPU and minimizes data transfer on RunPod.
+
+```bash
+# Locally using GPU (default)
+ioimg pipeline -i photo.jpg -o photo_ready.jpg --ops "scale=1920x1080,brighten=0.05,contrast=10"
+
+# Remotely on RunPod
+ioimg pipeline -i photo.jpg -o photo_ready.jpg -p runpod --ops "rotate=90,scale=1080x1920"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--ops` | Comma-separated operations (e.g. `scale=1280x720,brighten=0.1`) |
+
+Supported ops: `scale=WxH`, `crop=WxHxXxY`, `rotate=DEG`, `flip=v/h`, `brighten=LEVEL`, `contrast=LEVEL`, `saturate=LEVEL`, `denoise=PRESET`, `sharpen=AMOUNT`.
+
+### Execution Providers
+
+Iosuite is designed for high-performance by default.
+
+#### `local_gpu` (Default)
+Uses NVIDIA hardware acceleration (`-hwaccel cuda`) and optimized filters (like `scale_npp`) for zero-copy data flow. Requires an NVIDIA GPU and drivers.
+
+#### `local_cpu`
+Standard software processing using system CPU.
+
+#### `runpod`
+Executes tasks on RunPod serverless endpoints. Requires an API key and infrastructure initialization via `upscale init`.
+
+```bash
+# Scale an image
+ioimg scale -i photo.jpg -o photo_scaled.jpg --width 1920 --height 1080
+
+# Adjust contrast (-100 to 100)
+ioimg contrast -i photo.jpg -o photo_crisp.jpg --level 20
+
+# Flip an image (h or v)
+ioimg flip -i photo.jpg -o photo_flipped.jpg --axis v
+
+# Pad an image to aspect ratio
+ioimg pad -i photo.jpg -o photo_padded.jpg --aspect 16:9
+
+# Adjust saturation (0.0 to 3.0)
+ioimg saturate -i photo.jpg -o photo_vibrant.jpg --level 1.5
+
+# Denoise an image (presets: weak, med, strong)
+ioimg denoise -i photo.jpg -o photo_clean.jpg --preset strong
+
+# Sharpen an image (0.0 to 5.0)
+ioimg sharpen -i photo.jpg -o photo_sharp.jpg --amount 2.0
+
+# Combine frames into a video
+ioimg combine -i ./frames/frame_%05d.png -o output.mp4 --fps 30
+```
+
+### `ioimg list`
+
+Display a feature matrix of all commands and their supported providers (`local_cpu`, `local_gpu`, `runpod`, `replicate`).
 
 ### `ioimg upscale model list`
 

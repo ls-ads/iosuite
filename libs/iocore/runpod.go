@@ -15,6 +15,15 @@ import (
 	rpEndpoint "github.com/runpod/go-sdk/pkg/sdk/endpoint"
 )
 
+// NetworkVolume represents a RunPod network volume.
+type NetworkVolume struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Size         int    `json:"size"`
+	DataCenterID string `json:"dataCenterId"`
+	Status       string `json:"status"`
+}
+
 // RunPodAvailableGPUs is a list of all valid RunPod GPU types.
 var RunPodAvailableGPUs = []string{
 	"NVIDIA GeForce RTX 4090", "NVIDIA A40", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 5090",
@@ -123,8 +132,9 @@ type RunPodJobResponse struct {
 	DelayTime     int64  `json:"delayTime"`     // queue delay in milliseconds
 	ExecutionTime int64  `json:"executionTime"` // in milliseconds
 	Output        struct {
-		Status      string `json:"status"` // Optional
-		ImageBase64 string `json:"image_base64"`
+		Status       string `json:"status"` // Optional
+		ImageBase64  string `json:"image_base64"`
+		OutputBase64 string `json:"output_base64"`
 	} `json:"output"`
 	Error string `json:"error"`
 }
@@ -413,4 +423,100 @@ func DeleteRunPodEndpoint(ctx context.Context, key, id string) error {
 	}
 
 	return nil
+}
+
+// CreateNetworkVolume creates a new network volume on RunPod.
+func CreateNetworkVolume(ctx context.Context, key, name string, sizeGB int, region string) (string, error) {
+	url := "https://rest.runpod.io/v1/networkvolumes"
+	payload := map[string]interface{}{
+		"name":         name,
+		"size":         sizeGB,
+		"dataCenterId": region,
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to create network volume: %d - %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	return result.ID, nil
+}
+
+// DeleteNetworkVolume deletes a RunPod network volume by ID.
+func DeleteNetworkVolume(ctx context.Context, key, id string) error {
+	url := fmt.Sprintf("https://rest.runpod.io/v1/networkvolumes/%s", id)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to delete network volume: %d - %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// ListNetworkVolumes lists all network volumes for the account.
+func ListNetworkVolumes(ctx context.Context, key string) ([]NetworkVolume, error) {
+	url := "https://rest.runpod.io/v1/networkvolumes"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to list network volumes: %d - %s", resp.StatusCode, string(body))
+	}
+
+	var volumes []NetworkVolume
+	if err := json.NewDecoder(resp.Body).Decode(&volumes); err != nil {
+		return nil, err
+	}
+
+	return volumes, nil
 }

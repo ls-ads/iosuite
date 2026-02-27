@@ -13,9 +13,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "ioimg",
-	Short:         "iosuite image processing tool",
-	SilenceErrors: true,
+	Use:   "iovid",
+	Short: "iovid is a CLI tool for video transformations",
+	Long:  `iovid provides atomic verbs for video geometric and visual transformations using FFmpeg.`,
 }
 
 func Execute() error {
@@ -23,9 +23,9 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&input, "input", "i", "", "Input path")
-	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Output path")
+	rootCmd.PersistentFlags().StringVarP(&input, "input", "i", "", "input file")
+	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "output file")
 	rootCmd.PersistentFlags().StringVarP(&provider, "provider", "p", "local_gpu", "Execution provider (local_cpu, local_gpu, runpod)")
 	rootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
-	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "ffmpeg", "Model name (for upscale/ffmpeg)")
+	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "ffmpeg", "Model name")
 }

@@ -16,17 +16,21 @@ import (
 type UpscaleProvider string
 
 const (
-	ProviderLocal     UpscaleProvider = "local"
+	ProviderLocalCPU  UpscaleProvider = "local_cpu"
+	ProviderLocalGPU  UpscaleProvider = "local_gpu"
 	ProviderReplicate UpscaleProvider = "replicate"
 	ProviderRunPod    UpscaleProvider = "runpod"
 )
 
 // GetRunPodEndpointName returns the endpoint name prefix for a given model
 func GetRunPodEndpointName(model string) string {
-	if model == "real-esrgan" || model == "" {
-		return "ioimg-real-esrgan"
+	if model == "ffmpeg" {
+		return "iosuite-ffmpeg"
 	}
-	return "ioimg-" + model
+	if model == "real-esrgan" || model == "" {
+		return "iosuite-img-real-esrgan"
+	}
+	return "iosuite-img-" + model
 }
 
 // RunPodStatusUpdate provides progress information during RunPod job execution.
@@ -54,13 +58,16 @@ type Upscaler interface {
 // NewUpscaler returns an Upscaler implementation based on the provided config.
 func NewUpscaler(ctx context.Context, config *UpscaleConfig) (Upscaler, error) {
 	switch config.Provider {
-	case ProviderLocal:
+	case ProviderLocalCPU, ProviderLocalGPU:
+		if config.Model == "ffmpeg" {
+			return &ffmpegUpscaler{config: config}, nil
+		}
 		return &localUpscaler{config: config}, nil
 	case ProviderReplicate:
 		return &replicateUpscaler{config: config}, nil
 	case ProviderRunPod:
-		if config.Model != "real-esrgan" && config.Model != "" {
-			return nil, fmt.Errorf("model not supported: %s", config.Model)
+		if config.Model != "real-esrgan" && config.Model != "ffmpeg" && config.Model != "" {
+			return nil, fmt.Errorf("model not supported for RunPod upscaling: %s", config.Model)
 		}
 
 		key := config.APIKey
@@ -235,20 +242,43 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	// 2. Submit via /runsync — blocks until result is ready, zero polling overhead
-	inputPayload := map[string]interface{}{
-		"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
+	var inputPayload map[string]interface{}
+	if u.config.Model == "ffmpeg" {
+		inputPayload = map[string]interface{}{
+			"input_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
+			"ffmpeg_args":  "scale=iw*4:ih*4:flags=lanczos",
+			"output_ext":   u.config.OutputFormat,
+		}
+		if inputPayload["output_ext"] == "" {
+			inputPayload["output_ext"] = "png"
+		}
+	} else {
+		inputPayload = map[string]interface{}{
+			"image_base64": base64.StdEncoding.EncodeToString(buf.Bytes()),
+		}
+		if u.config.OutputFormat != "" {
+			inputPayload["output_format"] = u.config.OutputFormat
+		}
 	}
-	if u.config.OutputFormat != "" {
-		inputPayload["output_format"] = u.config.OutputFormat
-	}
+
 	job, err := RunRunPodJobSync(ctx, key, u.endpointID, inputPayload, u.emitStatus)
 	if err != nil {
 		return 0, err
 	}
 
 	// 4. Decode base64 image from output
-	if job.Output.ImageBase64 == "" {
-		return 0, fmt.Errorf("runpod worker returned no image in output (status: %s)", job.Output.Status)
+	var base64Out string
+	if u.config.Model == "ffmpeg" {
+		base64Out = job.Output.OutputBase64
+		if base64Out == "" {
+			base64Out = job.Output.ImageBase64 // Fallback
+		}
+	} else {
+		base64Out = job.Output.ImageBase64
+	}
+
+	if base64Out == "" {
+		return 0, fmt.Errorf("runpod worker returned no data in output (status: %s)", job.Status)
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(job.Output.ImageBase64)
@@ -259,4 +289,50 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	_, err = w.Write(decoded)
 	billableTime := time.Duration(job.ExecutionTime) * time.Millisecond
 	return billableTime, err
+}
+
+type ffmpegUpscaler struct {
+	config *UpscaleConfig
+}
+
+func (u *ffmpegUpscaler) Rate() float64  { return 0.0 }
+func (u *ffmpegUpscaler) IsActive() bool { return false }
+
+func (u *ffmpegUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (time.Duration, error) {
+	Info("Upscaling via FFmpeg (Lanczos)", "model", u.config.Model, "provider", u.config.Provider)
+	start := time.Now()
+
+	isGPU := u.config.Provider == ProviderLocalGPU || u.config.Provider == ""
+
+	// 4x upscale using Lanczos filter
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+	}
+
+	if isGPU {
+		args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+	}
+
+	args = append(args, "-i", "-")
+
+	filter := "scale=iw*4:ih*4:flags=lanczos"
+	if isGPU {
+		filter = "scale_npp=iw*4:ih*4:interp_algo=lanczos"
+	}
+	args = append(args, "-vf", filter)
+
+	args = append(args, "-f", "image2", "-")
+
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd.Stdin = r
+	cmd.Stdout = w
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("ffmpeg upscale failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	return time.Since(start), nil
 }
