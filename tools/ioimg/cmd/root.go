@@ -5,11 +5,12 @@ import (
 )
 
 var (
-	input    string
-	output   string
-	provider string
-	apiKey   string
-	model    string
+	input     string
+	output    string
+	provider  string
+	apiKey    string
+	model     string
+	overwrite bool
 )
 
 var rootCmd = &cobra.Command{
@@ -28,4 +29,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&provider, "provider", "p", "local_gpu", "Execution provider (local_cpu, local_gpu, runpod)")
 	rootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "ffmpeg", "Model name (for upscale/ffmpeg)")
+	rootCmd.PersistentFlags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
 }

@@ -58,10 +58,11 @@ func init() {
 			return iocore.Crop(ctx, cfg, input, output, imgCropW, imgCropH, imgCropX, imgCropY)
 		},
 	}
-	cropCmd.Flags().IntVar(&imgCropW, "w", 0, "crop width")
-	cropCmd.Flags().IntVar(&imgCropH, "h", 0, "crop height")
-	cropCmd.Flags().IntVar(&imgCropX, "x", 0, "crop x")
-	cropCmd.Flags().IntVar(&imgCropY, "y", 0, "crop y")
+	cropCmd.Flags().IntVarP(&imgCropW, "width", "w", 0, "crop width")
+	cropCmd.Flags().IntVarP(&imgCropH, "height", "h", 0, "crop height")
+	cropCmd.Flags().IntVarP(&imgCropX, "x", "x", 0, "crop x")
+	cropCmd.Flags().IntVarP(&imgCropY, "y", "y", 0, "crop y")
+	cropCmd.Flags().BoolP("help", "H", false, "help for crop")
 	rootCmd.AddCommand(cropCmd)
 
 	// Rotate

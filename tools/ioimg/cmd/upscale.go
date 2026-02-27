@@ -19,7 +19,6 @@ var (
 	jsonOutput      bool
 	outputFormat    string
 	recursive       bool
-	overwrite       bool
 	continueOnError bool
 	activeWorkers   bool
 	region          string
@@ -626,7 +625,6 @@ func init() {
 	upscaleCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results as JSON")
 	upscaleCmd.Flags().StringVarP(&outputFormat, "format", "f", "", "Output format: jpg or png (default: match input)")
 	upscaleCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Recursively process subdirectories")
-	upscaleCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
 	upscaleCmd.Flags().BoolVarP(&continueOnError, "continue-on-error", "c", false, "Continue processing remaining files after a failure")
 
 	// Redefine default model for upscale specifically if needed, otherwise skip
