@@ -94,29 +94,8 @@ func runStopRunPod(ctx context.Context) error {
 	return nil
 }
 
-var stopRunPodCmd = &cobra.Command{
-	Use:    "runpod",
-	Short:  "Tear down created runpod endpoints (legacy)",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStopRunPod(context.Background())
-	},
-}
-
-var stopFFmpegCmd = &cobra.Command{
-	Use:    "ffmpeg",
-	Short:  "Stop local FFmpeg binaries and clean up temporary files (legacy)",
-	Hidden: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		return iocore.CleanupLocalFFmpeg(ctx)
-	},
-}
-
 func init() {
 	stopCmd.Flags().BoolVarP(&stopYes, "yes", "y", false, "Skip confirmation prompt")
 
-	stopCmd.AddCommand(stopRunPodCmd)
-	stopCmd.AddCommand(stopFFmpegCmd)
 	rootCmd.AddCommand(stopCmd)
 }

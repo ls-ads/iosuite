@@ -33,6 +33,7 @@ func init() {
 		Use:   "scale",
 		Short: "Scale video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -50,6 +51,7 @@ func init() {
 		Use:   "crop",
 		Short: "Crop video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -69,6 +71,7 @@ func init() {
 		Use:   "rotate",
 		Short: "Rotate video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -85,6 +88,7 @@ func init() {
 		Use:   "flip",
 		Short: "Flip video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -101,6 +105,7 @@ func init() {
 		Use:   "pad",
 		Short: "Pad video to aspect ratio",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -117,6 +122,7 @@ func init() {
 		Use:   "brighten",
 		Short: "Adjust brightness",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -133,6 +139,7 @@ func init() {
 		Use:   "contrast",
 		Short: "Adjust contrast",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -149,6 +156,7 @@ func init() {
 		Use:   "saturate",
 		Short: "Adjust saturation",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -165,6 +173,7 @@ func init() {
 		Use:   "denoise",
 		Short: "Denoise video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -181,6 +190,7 @@ func init() {
 		Use:   "sharpen",
 		Short: "Sharpen video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -197,6 +207,7 @@ func init() {
 		Use:   "trim",
 		Short: "Trim video",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -214,6 +225,7 @@ func init() {
 		Use:   "fps",
 		Short: "Change frame rate",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -230,6 +242,7 @@ func init() {
 		Use:   "mute",
 		Short: "Remove audio",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
@@ -245,6 +258,7 @@ func init() {
 		Use:   "speed",
 		Short: "Change video speed",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}

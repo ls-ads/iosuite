@@ -29,6 +29,7 @@ func init() {
 		Use:   "scale",
 		Short: "Scale image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -50,6 +51,7 @@ func init() {
 		Use:   "crop",
 		Short: "Crop image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -70,6 +72,7 @@ func init() {
 		Use:   "rotate",
 		Short: "Rotate image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -86,6 +89,7 @@ func init() {
 		Use:   "flip",
 		Short: "Flip image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -102,6 +106,7 @@ func init() {
 		Use:   "pad",
 		Short: "Pad image to aspect ratio",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -118,6 +123,7 @@ func init() {
 		Use:   "brighten",
 		Short: "Adjust brightness",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -134,6 +140,7 @@ func init() {
 		Use:   "contrast",
 		Short: "Adjust contrast",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -150,6 +157,7 @@ func init() {
 		Use:   "saturate",
 		Short: "Adjust saturation",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -166,6 +174,7 @@ func init() {
 		Use:   "denoise",
 		Short: "Denoise image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}
@@ -182,6 +191,7 @@ func init() {
 		Use:   "sharpen",
 		Short: "Sharpen image",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) {
 				return fmt.Errorf("input must be an image (.jpg, .jpeg, .png): %s", input)
 			}

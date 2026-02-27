@@ -15,9 +15,9 @@
 ### General Flags
 - `-i`, `--input`: Input video file.
 - `-o`, `--output`: Output file or directory path.
-- `-p`, `--provider`: Execution provider (`local_cpu`, `local_gpu`, `runpod`). Default: `local_gpu`.
+- `-p`, `--provider`: Execution provider (`local_cpu`, `local_gpu`, `runpod`). (required for start/stop)
 - `-k`, `--api-key`: API key for remote execution.
-- `-m`, `--model`: Execution model (default: `ffmpeg`).
+- `-m`, `--model`: Execution model. (required for start/stop)
 
 ### Optimized Providers
 
@@ -97,6 +97,29 @@ iovid extract-audio -i input.mp4 -o audio.mp3
 
 # Stack two videos side-by-side
 iovid stack -i original.mp4 -i2 modified.mp4 -o comparison.mp4 --axis h
+```
+
+Provision cloud infrastructure for the selected model. Currently supports RunPod. **Provider and model flags are required.**
+
+```bash
+# Start RunPod infrastructure for ffmpeg
+iovid start -p runpod -m ffmpeg
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` / `-p` | (required) | Provider to start |
+| `--model` / `-m` | (required) | Model name |
+| `--active` | `false` | Keep at least one worker always running |
+
+Stop running processes or tear down cloud resources. **Provider and model flags are required.**
+
+```bash
+# Stop local FFmpeg processes
+iovid stop -p local_gpu -m ffmpeg
+
+# Tear down RunPod endpoints
+iovid stop -p runpod -m ffmpeg
 ```
 
 ## Requirements

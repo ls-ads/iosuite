@@ -21,6 +21,7 @@ func init() {
 		Long: `Run multiple transformations chained together.
 Example: iovid pipeline -i in.mp4 -o out.mp4 --ops "scale=1280x720,brighten=0.1,contrast=5"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("unsupported input: %s", input)
 			}

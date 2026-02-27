@@ -21,6 +21,7 @@ func init() {
 		Long: `Run multiple transformations chained together.
 Example: ioimg pipeline -i in.jpg -o out.jpg --ops "scale=1280x720,brighten=0.1,contrast=5"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
 			if !iocore.IsImage(input) && !iocore.IsVideo(input) {
 				return fmt.Errorf("unsupported input: %s", input)
 			}

@@ -9,14 +9,17 @@ import (
 	"iosuite.io/libs/iocore"
 )
 
-var initCmd = &cobra.Command{
-	Use:   "init",
+var startCmd = &cobra.Command{
+	Use:   "start",
 	Short: "Initialize and provision cloud infrastructure for the selected model",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if provider == "" || model == "" {
+			return fmt.Errorf("required flag(s) \"provider\" and \"model\" not set")
+		}
 		providerTyped := iocore.UpscaleProvider(provider)
 
 		if providerTyped != iocore.ProviderRunPod {
-			fmt.Printf("Initialization is not required for provider: %s\n", providerTyped)
+			fmt.Printf("Starting infrastructure is not required for provider: %s\n", providerTyped)
 			return nil
 		}
 
@@ -25,7 +28,7 @@ var initCmd = &cobra.Command{
 			key = os.Getenv("RUNPOD_API_KEY")
 		}
 		if key == "" {
-			return fmt.Errorf("api key is required for runpod init (set via -k or RUNPOD_API_KEY)")
+			return fmt.Errorf("api key is required for runpod start (set via -k or RUNPOD_API_KEY)")
 		}
 
 		ctx := context.Background()
@@ -88,10 +91,10 @@ var initCmd = &cobra.Command{
 }
 
 func init() {
-	initCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
-	initCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
-	initCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
-	initCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
+	startCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
+	startCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	startCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
+	startCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
-	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(startCmd)
 }

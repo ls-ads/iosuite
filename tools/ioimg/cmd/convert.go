@@ -12,6 +12,7 @@ var convertCmd = &cobra.Command{
 	Use:   "convert",
 	Short: "Convert/Process an image",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		resolveDefaults()
 		if input == "" || output == "" {
 			return fmt.Errorf("input and output are required")
 		}

@@ -52,12 +52,11 @@ var upscaleCmd = &cobra.Command{
 	Short:        "Upscale images using local or remote providers",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// If the user didn't specify a model, root default is "ffmpeg".
-		// For the upscale command, we want "real-esrgan" to be the default AI model.
-		// However, we now support "ffmpeg" as a valid model for upscaling too!
-		// To distinguish, we check if the flag was changed.
-		if !cmd.Flags().Changed("model") && model == "ffmpeg" {
+		if model == "" {
 			model = "real-esrgan"
+		}
+		if provider == "" {
+			provider = "local_gpu"
 		}
 
 		if input == "" {
@@ -93,14 +92,17 @@ var upscaleCmd = &cobra.Command{
 	},
 }
 
-var upscaleInitCmd = &cobra.Command{
-	Use:   "init",
+var upscaleStartCmd = &cobra.Command{
+	Use:   "start",
 	Short: "Initialize and provision required infrastructure for the upscaler",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if provider == "" || model == "" {
+			return fmt.Errorf("required flag(s) \"provider\" and \"model\" not set")
+		}
 		providerTyped := iocore.UpscaleProvider(provider)
 
 		if providerTyped != iocore.ProviderRunPod {
-			fmt.Printf("Initialization is not required for provider: %s\n", providerTyped)
+			fmt.Printf("Starting infrastructure is not required for provider: %s\n", providerTyped)
 			return nil
 		}
 
@@ -109,7 +111,7 @@ var upscaleInitCmd = &cobra.Command{
 			key = os.Getenv("RUNPOD_API_KEY")
 		}
 		if key == "" {
-			return fmt.Errorf("api key is required for runpod init (set via -k or RUNPOD_API_KEY)")
+			return fmt.Errorf("api key is required for runpod start (set via -k or RUNPOD_API_KEY)")
 		}
 
 		ctx := context.Background()
@@ -119,7 +121,7 @@ var upscaleInitCmd = &cobra.Command{
 			workersMin = 1
 		}
 
-		fmt.Printf("Initializing RunPod infrastructure for model '%s'...\n", model)
+		fmt.Printf("Successfully started RunPod infrastructure for model '%s'...\n", model)
 		if activeWorkers {
 			fmt.Println("Mode: always active (workersMin=1)")
 		}
@@ -151,10 +153,10 @@ var upscaleInitCmd = &cobra.Command{
 		}, dataCenterIDs, workersMin)
 
 		if err != nil {
-			return fmt.Errorf("failed to initialize infrastructure: %v", err)
+			return fmt.Errorf("failed to start infrastructure: %v", err)
 		}
 
-		fmt.Printf("Successfully initialized RunPod endpoint!\nEndpoint ID: %s\n", endpointID)
+		fmt.Printf("Successfully started RunPod endpoint!\nEndpoint ID: %s\n", endpointID)
 		return nil
 	},
 }
@@ -628,15 +630,15 @@ func init() {
 	upscaleCmd.Flags().BoolVarP(&continueOnError, "continue-on-error", "c", false, "Continue processing remaining files after a failure")
 
 	// Redefine default model for upscale specifically if needed, otherwise skip
-	upscaleInitCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
-	upscaleInitCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
-	upscaleInitCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
-	upscaleInitCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
+	upscaleStartCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
+	upscaleStartCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	upscaleStartCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
+	upscaleStartCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderGPUListCmd)
-	upscaleCmd.AddCommand(upscaleInitCmd)
+	upscaleCmd.AddCommand(upscaleStartCmd)
 	upscaleCmd.AddCommand(upscaleModelCmd)
 	upscaleCmd.AddCommand(upscaleProviderCmd)
 	rootCmd.AddCommand(upscaleCmd)

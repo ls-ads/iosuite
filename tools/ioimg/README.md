@@ -22,9 +22,9 @@ ioimg upscale -i <input> [flags]
 | `--recursive` | `-r` | `false` | Recursively process subdirectories |
 | `--overwrite` | | `false` | Reprocess all files even if output already exists |
 | `--continue-on-error` | `-c` | `false` | Continue processing remaining files after a failure |
-| `--provider` | `-p` | `local_gpu` | Execution provider (`local_cpu`, `local_gpu`, `runpod`) |
+| `--provider` | `-p` | (required for start/stop) | Execution provider (`local_cpu`, `local_gpu`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
-| `--model` | `-m` | `real-esrgan` | Upscale model (or `ffmpeg`) |
+| `--model` | `-m` | (required for start/stop) | Upscale model (or `ffmpeg`) |
 | `--json` | | `false` | Output metrics as JSON |
 
 #### Output Path
@@ -151,26 +151,46 @@ After processing, a summary table is displayed:
 
 Use `--json` to get the same metrics in machine-readable JSON format.
 
-### `ioimg upscale init`
+### `ioimg start`
 
-Provision cloud infrastructure for upscaling. Currently supports RunPod.
+Provision cloud infrastructure for the selected model. Currently supports RunPod. **Provider and model flags are required.**
 
 ```bash
-# Initialize a RunPod endpoint (flex, all regions)
-ioimg upscale init -p runpod
+# Start RunPod infrastructure for ffmpeg
+ioimg start -p runpod -m ffmpeg
 
-# Always-active endpoint in the US with a specific GPU
-ioimg upscale init -p runpod --active --region us --gpu "NVIDIA RTX A5000"
+# Start always-active infrastructure for real-esrgan in a specific region
+ioimg start -m real-esrgan -p runpod --active --region us --gpu "NVIDIA RTX A5000"
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` / `-p` | `local_gpu` | Provider to initialize |
+| `--provider` / `-p` | (required) | Provider to start (`runpod` is the main target for infrastructure) |
 | `--api-key` / `-k` | | API key (or set `RUNPOD_API_KEY`) |
-| `--model` / `-m` | `real-esrgan` | Model to provision |
+| `--model` / `-m` | (required) | Model to provision |
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
 | `--region` | `all` | Region constraint: `us`, `eu`, `ca`, or `all` |
 | `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
+
+### `ioimg stop`
+
+Stop running processes or tear down cloud resources. **Provider and model flags are required.**
+
+```bash
+# Stop local FFmpeg processes (terminates background workers)
+ioimg stop -p local_gpu -m ffmpeg
+
+# Tear down RunPod endpoints for a specific model
+ioimg stop -p runpod -m real-esrgan
+```
+
+| Flag | Description |
+|------|-------------|
+| `--provider` / `-p` | Provider to stop (required) |
+| `--model` / `-m` | Model name to stop (required) |
+| `--yes` / `-y` | Skip confirmation prompt for resource deletion |
+
+### `ioimg upscale start`
 
 If an endpoint for the model already exists, the command reports it and exits without creating a duplicate.
 
@@ -198,9 +218,7 @@ By default, endpoints are configured with a prioritized list of efficient 16GB G
 
 You can override this and specify any valid RunPod GPU type using the `--gpu` flag. Valid options include `NVIDIA GeForce RTX 4090`, `NVIDIA A100-SXM4-80GB`, `NVIDIA H100 PCIe`, `NVIDIA B200`, etc.
 
-### `ioimg upscale provider gpus [provider]`
-
-List available GPUs for a specific provider. This is useful for finding the correct GPU name to use with `upscale init --gpu`.
+List available GPUs for a specific provider. This is useful for finding the correct GPU name to use with `start --gpu`.
 
 ```bash
 # List all available GPUs for RunPod
@@ -231,7 +249,7 @@ Atomic image transformations and bridge commands using FFmpeg.
 - **Bridge**: `combine` (images to video).
 - **Control**: `pipeline` (chained execution).
 
-All transformation verbs support the global `--provider` flag, allowing you to run them locally on CPU/GPU or remotely on RunPod.
+All transformation verbs support the global `--provider` flag. While infrastructure commands (`start`, `stop`) require explicit flags, transformation verbs will default to `local_gpu` and `ffmpeg` if the flags are omitted for ease of use.
 
 ### `ioimg pipeline`
 
@@ -262,7 +280,7 @@ Uses NVIDIA hardware acceleration (`-hwaccel cuda`) and optimized filters (like 
 Standard software processing using system CPU.
 
 #### `runpod`
-Executes tasks on RunPod serverless endpoints. Requires an API key and infrastructure initialization via `upscale init`.
+Executes tasks on RunPod serverless endpoints. Requires an API key and infrastructure initialization via `start`.
 
 ```bash
 # Scale an image

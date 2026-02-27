@@ -16,14 +16,17 @@ var (
 	dataCenter    string
 )
 
-var initCmd = &cobra.Command{
-	Use:   "init",
+var startCmd = &cobra.Command{
+	Use:   "start",
 	Short: "Initialize and provision cloud infrastructure for the selected model",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if provider == "" || model == "" {
+			return fmt.Errorf("required flag(s) \"provider\" and \"model\" not set")
+		}
 		providerTyped := iocore.UpscaleProvider(provider)
 
 		if providerTyped != iocore.ProviderRunPod {
-			fmt.Printf("Initialization is not required for provider: %s\n", providerTyped)
+			fmt.Printf("Starting infrastructure is not required for provider: %s\n", providerTyped)
 			return nil
 		}
 
@@ -32,7 +35,7 @@ var initCmd = &cobra.Command{
 			key = os.Getenv("RUNPOD_API_KEY")
 		}
 		if key == "" {
-			return fmt.Errorf("api key is required for runpod init (set via -k or RUNPOD_API_KEY)")
+			return fmt.Errorf("api key is required for runpod start (set via -k or RUNPOD_API_KEY)")
 		}
 
 		ctx := context.Background()
@@ -78,7 +81,7 @@ var initCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Initializing RunPod infrastructure for model '%s'...\n", model)
+		fmt.Printf("Successfully started RunPod infrastructure for model '%s'...\n", model)
 		if activeWorkers {
 			fmt.Println("Mode: always active (workersMin=1)")
 		}
@@ -86,19 +89,19 @@ var initCmd = &cobra.Command{
 
 		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIDs, workersMin)
 		if err != nil {
-			return fmt.Errorf("failed to initialize infrastructure: %v", err)
+			return fmt.Errorf("failed to start infrastructure: %v", err)
 		}
 
-		fmt.Printf("Successfully initialized RunPod endpoint!\nEndpoint ID: %s\n", endpointID)
+		fmt.Printf("Successfully started RunPod endpoint!\nEndpoint ID: %s\n", endpointID)
 		return nil
 	},
 }
 
 func init() {
-	initCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
-	initCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
-	initCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
-	initCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
+	startCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
+	startCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	startCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
+	startCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
-	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(startCmd)
 }
