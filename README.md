@@ -26,7 +26,9 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
    ioimg upscale --input photo.jpg --output photo_4x.jpg --model real-esrgan --provider runpod
    ```
 
----
+For a full list of available commands and detailed usage for each tool, see:
+- [ioimg Commands Reference](tools/ioimg/README.md)
+- [iovid Commands Reference](tools/iovid/README.md)
 
 ## Installation & Shell Completion
 
