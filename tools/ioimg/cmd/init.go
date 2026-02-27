@@ -63,15 +63,16 @@ var startCmd = &cobra.Command{
 		var modelCfg iocore.ModelConfig
 		if model == "ffmpeg" {
 			modelCfg = iocore.ModelConfig{
-				TemplateID: "047z8w5i69", // Assuming shared/similar template or ffmpeg-specific one
+				TemplateID: "uduo7jdyhn",
 				GPUIDs:     gpuIDs,
 			}
-		} else {
-			// Default to upscaler config
+		} else if model == "real-esrgan" {
 			modelCfg = iocore.ModelConfig{
 				TemplateID: "047z8w5i69",
 				GPUIDs:     gpuIDs,
 			}
+		} else {
+			return fmt.Errorf("unsupported model for RunPod infrastructure: %s (supported: ffmpeg, real-esrgan)", model)
 		}
 
 		fmt.Printf("Initializing RunPod infrastructure for model '%s'...\n", model)

@@ -147,10 +147,22 @@ var upscaleStartCmd = &cobra.Command{
 			gpuIDs = []string{gpuType}
 		}
 
-		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, iocore.ModelConfig{
-			TemplateID: "047z8w5i69",
-			GPUIDs:     gpuIDs,
-		}, dataCenterIDs, workersMin)
+		var modelCfg iocore.ModelConfig
+		if model == "ffmpeg" {
+			modelCfg = iocore.ModelConfig{
+				TemplateID: "uduo7jdyhn",
+				GPUIDs:     gpuIDs,
+			}
+		} else if model == "real-esrgan" {
+			modelCfg = iocore.ModelConfig{
+				TemplateID: "047z8w5i69",
+				GPUIDs:     gpuIDs,
+			}
+		} else {
+			return fmt.Errorf("unsupported model for RunPod infrastructure: %s (supported: ffmpeg, real-esrgan)", model)
+		}
+
+		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIDs, workersMin)
 
 		if err != nil {
 			return fmt.Errorf("failed to start infrastructure: %v", err)
