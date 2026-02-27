@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 )
 
@@ -310,14 +311,25 @@ func (u *ffmpegUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	if isGPU {
-		args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		if runtime.GOOS == "darwin" {
+			args = append(args, "-hwaccel", "videotoolbox")
+		} else {
+			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		}
 	}
 
 	args = append(args, "-i", "-")
 
 	filter := "scale=iw*4:ih*4:flags=lanczos"
 	if isGPU {
-		filter = "scale_npp=iw*4:ih*4:interp_algo=lanczos"
+		if runtime.GOOS == "darwin" {
+			// Metal/VideoToolbox doesn't have a direct scale_npp equivalent here,
+			// but we can scale via CPU lanczos or another filter if needed.
+			// For now, lanczos is high quality enough.
+			filter = "scale=iw*4:ih*4:flags=lanczos"
+		} else {
+			filter = "scale_npp=iw*4:ih*4:interp_algo=lanczos"
+		}
 	}
 	args = append(args, "-vf", filter)
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -45,7 +46,12 @@ func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string,
 
 	if isGPU {
 		// Hardware acceleration for decoding
-		args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		if runtime.GOOS == "darwin" {
+			args = append(args, "-hwaccel", "videotoolbox")
+		} else {
+			// Windows/Linux assume CUDA if GPU provider is selected
+			args = append(args, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		}
 	}
 
 	// Handle input
@@ -70,8 +76,13 @@ func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string,
 	// Encoding optimization
 	if isGPU {
 		if IsVideo(output) {
-			// Use NVENC for video encoding
-			args = append(args, "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq")
+			if runtime.GOOS == "darwin" {
+				// Use VideoToolbox for macOS
+				args = append(args, "-c:v", "h264_videotoolbox", "-b:v", "5M")
+			} else {
+				// Use NVENC for video encoding on Windows/Linux
+				args = append(args, "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq")
+			}
 		}
 	}
 
