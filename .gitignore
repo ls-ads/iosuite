@@ -31,3 +31,6 @@ Thumbs.db
 
 # GitHub CLI Scripts
 gh/
+
+# Examples
+examples/
