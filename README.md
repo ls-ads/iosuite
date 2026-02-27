@@ -17,13 +17,13 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 2. **Start Infrastructure**: Provision a specialized AI endpoint on RunPod.
    ```bash
    # Automatically creates a TensorRT-optimized real-esrgan endpoint
-   ioimg start -m real-esrgan -p runpod -k YOUR_API_KEY
+   ioimg start --model real-esrgan --provider runpod --api-key YOUR_API_KEY
    ```
 
 3. **Upscale Media**: Process your images with lightning-fast AI.
    ```bash
    # Upscale using your new RunPod endpoint
-   ioimg upscale -i photo.jpg -o photo_4x.jpg -p runpod
+   ioimg upscale --input photo.jpg --output photo_4x.jpg --model real-esrgan --provider runpod
    ```
 
 ---
