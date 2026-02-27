@@ -1,8 +1,8 @@
 # iosuite
 
-A high-performance, unified suite for image and video processing. Leveraging FFmpeg, local GPU acceleration (NCNN/Vulkan/CUDA), and serverless cloud providers (RunPod/Replicate).
+A high-performance, unified suite for image and video processing. Leveraging FFmpeg and serverless cloud providers (RunPod/Replicate).
 
-`iosuite` is designed to be truly universal, providing bit-for-bit identical results across **Linux**, **Windows**, and **macOS** by standardizing on optimized backends like `ffmpeg-serve` and `real-esrgan-serve`.
+`iosuite` is designed to be truly universal, providing bit-for-bit identical results across **Linux**, **Windows**, and **macOS** by standardizing on backends like `ffmpeg-serve` and `real-esrgan-serve`.
 
 ---
 
@@ -65,9 +65,10 @@ Invoke-RestMethod -Uri https://raw.githubusercontent.com/ls-ads/iosuite/main/scr
 - **`libiocore`**: A C-shared library bridge allowing the core logic to be imported by Python, Rust, or C++ applications.
 
 ### Standardized Backends
+
 To ensure consistency across platforms, `iosuite` utilizes specialized wrappers:
-- **`ffmpeg-serve`**: The primary local FFmpeg engine, providing a standardized CLI and REST API.
-- **`real-esrgan-serve`**: A TensorRT-optimized bridge for ultra-fast AI upscaling on NVIDIA hardware.
+- **[ffmpeg-serve](https://github.com/ls-ads/ffmpeg-serve)**: The primary local FFmpeg engine, providing a standardized CLI and REST API.
+- **[real-esrgan-serve](https://github.com/ls-ads/real-esrgan-serve)**: A TensorRT-optimized bridge for ultra-fast AI upscaling on NVIDIA hardware.
 
 ---
 
