@@ -37,21 +37,48 @@ make build-all
 
 ---
 
-## Getting Started
+## Installation & Setup
 
-### 1. Installation
-Provision required binaries (like `ffmpeg-serve`) for your specific platform locally:
+Installation is a two-step process: First, install the **CLI tools** themselves; then, use those tools to provision the **processing models** (like FFmpeg).
+
+### 1. Install CLI Tools (`ioimg` & `iovid`)
+
+#### Option A: Download Pre-built Binaries (Recommended)
+Download the latest binary for your OS and architecture from the [GitHub Releases](https://github.com/ls-ads/iosuite/releases).
+- **Windows**: `ioimg-windows-amd64.exe`
+- **Linux**: `ioimg-linux-amd64`
+- **macOS (Apple Silicon)**: `ioimg-darwin-arm64`
+
+#### Option B: Build from Source
+If you have Go installed (1.25.5+), you can build the tools natively:
+```bash
+make build
+# Binaries will be located in the bin/ directory
+```
+
+### 2. Install Models & Backends
+Once the CLI is installed, use the `install` command to provision necessary dependencies (like `ffmpeg-serve`) for your platform:
 
 ```bash
+# Automatically detects OS/Arch, downloads, and verifies checksums
 ./bin/ioimg install -m ffmpeg
 ```
 
-### 2. Feature Discovery
-Check command-provider compatibility across local CPU, GPU, and cloud providers:
+---
+
+## Usage & Discovery
+
+### Feature Matrix
+Check which commands are supported by your local hardware (CPU/GPU) vs Cloud providers (RunPod/Replicate):
 
 ```bash
-./ioimg list
-./iovid list
+./bin/ioimg list
+./bin/iovid list
+```
+
+### Basic Example: Upscaling
+```bash
+./bin/ioimg upscale -i image.jpg -o output.jpg -p local_gpu
 ```
 
 ---
