@@ -34,9 +34,9 @@ $(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY
 $(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY_TARGET,iovid,$(p),$(a)))))
 
 test:
-	@echo "🏃 Running Go Unit Tests (iocore)..."
+	@echo "Running Go Unit Tests (iocore)..."
 	go test ./libs/iocore
-	@echo "🏃 Running Integration Tests..."
+	@echo "Running Integration Tests..."
 	./scripts/test_examples.sh
 
 clean:

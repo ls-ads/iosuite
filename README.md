@@ -6,7 +6,7 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 ---
 
-## 🚀 Quick Start (In 3 Commands)
+## Quick Start (In 3 Commands)
 
 1. **Install CLI**: Download the tools + autocompletions in one go.
    ```bash
@@ -28,7 +28,7 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 ---
 
-## ⚙️ Installation & Shell Completion
+## Installation & Shell Completion
 
 Get `ioimg` and `iovid` in your system path with full autocompletion (Bash, Zsh, Fish, PowerShell).
 
@@ -54,7 +54,7 @@ Invoke-RestMethod -Uri https://raw.githubusercontent.com/ls-ads/iosuite/main/scr
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 `iosuite` is built on a modular, Go-native core designed for maximum portability and performance.
 
@@ -71,7 +71,7 @@ To ensure consistency across platforms, `iosuite` utilizes specialized wrappers:
 
 ---
 
-## 🌍 Universal Compatibility
+## Universal Compatibility
 
 | OS | Architectures | Accelerated By |
 | :--- | :--- | :--- |
@@ -88,7 +88,7 @@ make build-all
 
 ---
 
-## 🧪 Verification & Testing
+## Verification & Testing
 
 We maintain a dual-layered testing strategy to ensure reliability:
 
@@ -109,7 +109,7 @@ End-to-end "Smoke Tests" using standardized example assets.
 
 ---
 
-## 🛠️ Discovery & Help
+## Discovery & Help
 
 Use the `list` command to explore supported features and provider compatibility for your specific hardware:
 
