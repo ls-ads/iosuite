@@ -8,25 +8,22 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 ## 🚀 Quick Start (In 3 Commands)
 
-1. **Install CLI**: Download and set up the tools + autocompletions in one go.
+1. **Install CLI**: Download the tools + autocompletions in one go.
    ```bash
-   # Linux/macOS
    curl -sSL https://raw.githubusercontent.com/ls-ads/iosuite/main/scripts/install.sh | bash
+   source ~/.$(basename $SHELL)rc
    ```
 
-2. **Provision Backend**: Initialize your local or cloud processing environment.
+2. **Start Infrastructure**: Provision a specialized AI endpoint on RunPod.
    ```bash
-   # Local: Install FFmpeg & Real-ESRGAN backends
-   ./bin/ioimg install -m ffmpeg
-   
-   # Cloud: Automatic RunPod endpoint provisioning
-   ioimg start -m ffmpeg -p runpod -k YOUR_API_KEY
+   # Automatically creates a TensorRT-optimized real-esrgan endpoint
+   ioimg start -m real-esrgan -p runpod -k YOUR_API_KEY
    ```
 
-3. **Process Media**: Start processing with hardware acceleration.
+3. **Upscale Media**: Process your images with lightning-fast AI.
    ```bash
-   # Upscale an image using local GPU
-   ioimg upscale -i image.jpg -o output.jpg -p local_gpu
+   # Upscale using your new RunPod endpoint
+   ioimg upscale -i photo.jpg -o photo_4x.jpg -p runpod
    ```
 
 ---

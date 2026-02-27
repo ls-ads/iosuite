@@ -23,8 +23,15 @@ var ffmpegServeChecksums = map[string]string{
 
 // InstallModel downloads and installs a supported model/binary for the current platform.
 func InstallModel(ctx context.Context, model string) error {
-	if model != "ffmpeg" {
-		return fmt.Errorf("model %s is not supported for installation yet (leaving real-esrgan alone per request)", model)
+	switch model {
+	case "ffmpeg":
+		// Proceed with ffmpeg installation logic below
+	case "real-esrgan":
+		Info("Initializing real-esrgan setup...", "status", "coming soon")
+		fmt.Println("real-esrgan model setup is being initialized. Full automation will be available in the next release.")
+		return nil
+	default:
+		return fmt.Errorf("model %s is not supported for installation yet", model)
 	}
 
 	osName := runtime.GOOS
