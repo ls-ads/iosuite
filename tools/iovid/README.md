@@ -110,6 +110,7 @@ iovid start -p runpod -m ffmpeg
 |------|---------|-------------|
 | `--provider` / `-p` | (required) | Provider to start |
 | `--model` / `-m` | (required) | Model name |
+| `--data-center` | `EU-RO-1` | Data center ID(s) |
 | `--active` | `false` | Keep at least one worker always running |
 
 Stop running processes or tear down cloud resources. **Provider and model flags are required.**

@@ -21,9 +21,8 @@ var (
 	recursive       bool
 	continueOnError bool
 	activeWorkers   bool
-	region          string
 	gpuType         string
-	dataCenter      string
+	dataCenterIds   []string
 )
 
 type batchMetrics struct {
@@ -127,13 +126,7 @@ var upscaleStartCmd = &cobra.Command{
 		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
-		dataCenterIDs, err := iocore.RegionToDataCenterIDs(region)
-		if err != nil {
-			return err
-		}
-		if dataCenter != "" {
-			dataCenterIDs = []string{dataCenter}
-		}
+		// Use dataCenterIds slice directly from flags
 
 		gpuIDs := []string{
 			"NVIDIA RTX A4000",
@@ -162,7 +155,7 @@ var upscaleStartCmd = &cobra.Command{
 			return fmt.Errorf("unsupported model for RunPod infrastructure: %s (supported: ffmpeg, real-esrgan)", model)
 		}
 
-		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIDs, workersMin)
+		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIds, workersMin)
 
 		if err != nil {
 			return fmt.Errorf("failed to start infrastructure: %v", err)
@@ -643,9 +636,8 @@ func init() {
 
 	// Redefine default model for upscale specifically if needed, otherwise skip
 	upscaleStartCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
-	upscaleStartCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	upscaleStartCmd.Flags().StringSliceVar(&dataCenterIds, "data-center", []string{"EU-RO-1"}, "Direct RunPod data center IDs")
 	upscaleStartCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
-	upscaleStartCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
 	upscaleModelCmd.AddCommand(upscaleModelListCmd)
 	upscaleProviderCmd.AddCommand(upscaleProviderListCmd)

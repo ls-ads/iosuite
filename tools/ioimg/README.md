@@ -159,8 +159,8 @@ Provision cloud infrastructure for the selected model. Currently supports RunPod
 # Start RunPod infrastructure for ffmpeg
 ioimg start -p runpod -m ffmpeg
 
-# Start always-active infrastructure for real-esrgan in a specific region
-ioimg start -m real-esrgan -p runpod --active --region us --gpu "NVIDIA RTX A5000"
+# Start always-active infrastructure for real-esrgan in a specific data center
+ioimg start -m real-esrgan -p runpod --active --data-center US-TX-3 --gpu "NVIDIA RTX A5000"
 ```
 
 | Flag | Default | Description |
@@ -169,7 +169,7 @@ ioimg start -m real-esrgan -p runpod --active --region us --gpu "NVIDIA RTX A500
 | `--api-key` / `-k` | | API key (or set `RUNPOD_API_KEY`) |
 | `--model` / `-m` | (required) | Model to provision |
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
-| `--region` | `all` | Region constraint: `us`, `eu`, `ca`, or `all` |
+| `--data-center` | `EU-RO-1` | Specific RunPod data center ID(s) (comma-separated) |
 | `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
 
 ### `ioimg stop`
@@ -231,7 +231,7 @@ Manage RunPod network volumes for large media handling.
 
 ```bash
 # Create a 100GB volume in EU-RO-1
-ioimg runpod volume create --name my-media --size 100 --region EU-RO-1
+ioimg runpod volume create --name my-media --size 100 --data-center EU-RO-1
 
 # List all volumes
 ioimg runpod volume list

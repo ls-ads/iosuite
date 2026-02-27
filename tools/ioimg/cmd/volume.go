@@ -11,9 +11,10 @@ import (
 )
 
 var (
-	volName string
-	volSize int
-	volID   string
+	volName       string
+	volSize       int
+	volID         string
+	volDataCenter string
 )
 
 var runpodCmd = &cobra.Command{
@@ -39,7 +40,7 @@ var volumeCreateCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		id, err := iocore.CreateNetworkVolume(ctx, key, volName, volSize, region)
+		id, err := iocore.CreateNetworkVolume(ctx, key, volName, volSize, volDataCenter)
 		if err != nil {
 			return err
 		}
@@ -111,7 +112,7 @@ var volumeListCmd = &cobra.Command{
 func init() {
 	volumeCreateCmd.Flags().StringVar(&volName, "name", "", "volume name")
 	volumeCreateCmd.Flags().IntVar(&volSize, "size", 10, "volume size in GB")
-	volumeCreateCmd.Flags().StringVar(&region, "region", "EU-RO-1", "data center ID")
+	volumeCreateCmd.Flags().StringVar(&volDataCenter, "data-center", "EU-RO-1", "data center ID")
 
 	volumeDeleteCmd.Flags().StringVar(&volID, "id", "", "volume ID")
 

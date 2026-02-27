@@ -15,30 +15,6 @@ import (
 	rpEndpoint "github.com/runpod/go-sdk/pkg/sdk/endpoint"
 )
 
-// RegionToDataCenterIDs maps simplified region names to RunPod data center IDs.
-// Returns nil for "all" so that the API default (all regions) is used.
-func RegionToDataCenterIDs(region string) ([]string, error) {
-	switch strings.ToLower(region) {
-	case "all", "":
-		return nil, nil
-	case "us":
-		return []string{
-			"US-IL-1", "US-TX-1", "US-TX-3", "US-TX-4",
-			"US-GA-1", "US-GA-2", "US-KS-2", "US-KS-3",
-			"US-WA-1", "US-CA-2", "US-NC-1", "US-DE-1",
-		}, nil
-	case "eu":
-		return []string{
-			"EU-RO-1", "EU-SE-1", "EU-CZ-1", "EU-NL-1", "EU-FR-1",
-			"EUR-IS-1", "EUR-IS-2", "EUR-IS-3", "EUR-NO-1",
-		}, nil
-	case "ca":
-		return []string{"CA-MTL-1", "CA-MTL-2", "CA-MTL-3"}, nil
-	default:
-		return nil, fmt.Errorf("unsupported region: %s (valid: us, eu, ca, all)", region)
-	}
-}
-
 // NetworkVolume represents a RunPod network volume.
 type NetworkVolume struct {
 	ID           string `json:"id"`
@@ -497,12 +473,12 @@ func DeleteRunPodEndpoint(ctx context.Context, key, id string) error {
 }
 
 // CreateNetworkVolume creates a new network volume on RunPod.
-func CreateNetworkVolume(ctx context.Context, key, name string, sizeGB int, region string) (string, error) {
+func CreateNetworkVolume(ctx context.Context, key, name string, sizeGB int, dataCenterID string) (string, error) {
 	url := "https://rest.runpod.io/v1/networkvolumes"
 	payload := map[string]interface{}{
 		"name":         name,
 		"size":         sizeGB,
-		"dataCenterId": region,
+		"dataCenterId": dataCenterID,
 	}
 
 	jsonData, err := json.Marshal(payload)

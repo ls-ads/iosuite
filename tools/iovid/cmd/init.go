@@ -11,9 +11,8 @@ import (
 
 var (
 	activeWorkers bool
-	region        string
 	gpuType       string
-	dataCenter    string
+	dataCenterIds []string
 )
 
 var startCmd = &cobra.Command{
@@ -45,13 +44,7 @@ var startCmd = &cobra.Command{
 			workersMin = 1
 		}
 
-		dataCenterIDs, err := iocore.RegionToDataCenterIDs(region)
-		if err != nil {
-			return err
-		}
-		if dataCenter != "" {
-			dataCenterIDs = []string{dataCenter}
-		}
+		// Use dataCenterIds slice directly from flags
 
 		// GPU configuration
 		gpuIDs := []string{
@@ -88,7 +81,7 @@ var startCmd = &cobra.Command{
 		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
-		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIDs, workersMin)
+		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIds, workersMin)
 		if err != nil {
 			return fmt.Errorf("failed to start infrastructure: %v", err)
 		}
@@ -100,9 +93,8 @@ var startCmd = &cobra.Command{
 
 func init() {
 	startCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
-	startCmd.Flags().StringVar(&region, "region", "all", "Region for endpoint (us, eu, ca, all)")
+	startCmd.Flags().StringSliceVar(&dataCenterIds, "data-center", []string{"EU-RO-1"}, "Direct RunPod data center IDs")
 	startCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
-	startCmd.Flags().StringVar(&dataCenter, "datacenter", "EU-RO-1", "Direct RunPod datacenter ID (overrides region)")
 
 	rootCmd.AddCommand(startCmd)
 }
