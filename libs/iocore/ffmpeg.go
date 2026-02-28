@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -91,16 +90,7 @@ func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string,
 	// Always overwrite
 	args = append(args, "-y", output)
 
-	binPath, err := ResolveBinary("ffmpeg-serve")
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
+	if err := RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("ffmpeg failed (provider: %s): %v", provider, err)
 	}
 	return nil
@@ -384,16 +374,7 @@ func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec,
 	args = append(args, extraArgs...)
 	args = append(args, "-y", output)
 
-	binPath, err := ResolveBinary("ffmpeg-serve")
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr)
 }
 
 func FPS(ctx context.Context, config *FFmpegConfig, input, output string, rate int) error {
@@ -422,16 +403,7 @@ func GetVideoDuration(ctx context.Context, input string) (float64, error) {
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		input,
 	}
-	binPath, err := ResolveBinary("ffprobe")
-	if err != nil {
-		return 0, err
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdout = &out
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Run()
+	err := RunBinary(ctx, "ffprobe", args, nil, &out, os.Stderr)
 	if err != nil {
 		return 0, fmt.Errorf("ffprobe failed: %v", err)
 	}
@@ -470,14 +442,5 @@ func Chunk(ctx context.Context, input, outputPattern string, chunks int, length 
 		outputPattern,
 	}
 
-	binPath, err := ResolveBinary("ffmpeg-serve")
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr)
 }

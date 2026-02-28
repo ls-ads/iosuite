@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"time"
 )
@@ -119,17 +118,9 @@ func (u *localUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) (
 		args = append(args, "-f", u.config.OutputFormat)
 	}
 
-	binPath, err := ResolveBinary("realesrgan-ncnn-vulkan")
-	if err != nil {
-		return 0, err
-	}
-
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdin = r
-	cmd.Stdout = w
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	err := RunBinary(ctx, "realesrgan-ncnn-vulkan", args, r, w, &stderr)
+	if err != nil {
 		return 0, fmt.Errorf("local upscale failed: %v, stderr: %s", err, stderr.String())
 	}
 	return time.Since(start), nil
@@ -329,17 +320,8 @@ func (u *ffmpegUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 
 	args = append(args, "-f", "image2", "-")
 
-	binPath, err := ResolveBinary("ffmpeg-serve")
-	if err != nil {
-		return 0, err
-	}
-
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stdin = r
-	cmd.Stdout = w
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := RunBinary(ctx, "ffmpeg-serve", args, r, w, &stderr); err != nil {
 		return 0, fmt.Errorf("ffmpeg upscale failed: %v, stderr: %s", err, stderr.String())
 	}
 

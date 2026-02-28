@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -59,16 +58,7 @@ func Stack(ctx context.Context, config *FFmpegConfig, input1, input2, output str
 		"-y", output,
 	}
 
-	binPath, err := ResolveBinary("ffmpeg-serve")
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.CommandContext(ctx, binPath, args...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Run(); err != nil {
+	if err := RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr); err != nil {
 		return fmt.Errorf("ffmpeg stack failed: %v", err)
 	}
 	return nil
