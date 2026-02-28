@@ -1,12 +1,14 @@
 package iocore
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -295,4 +297,54 @@ func Speed(ctx context.Context, config *FFmpegConfig, input, output string, mult
 	videoFilter := fmt.Sprintf("setpts=%f*PTS", 1.0/multiplier)
 	extraArgs := []string{"-filter_complex", fmt.Sprintf("[0:v]%s[v];[0:a]atempo=%f[a]", videoFilter, multiplier), "-map", "[v]", "-map", "[a]"}
 	return RunFFmpegAction(ctx, config, input, output, "", extraArgs)
+}
+
+func GetVideoDuration(ctx context.Context, input string) (float64, error) {
+	var out bytes.Buffer
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		input,
+	}
+	err := RunBinary(ctx, "ffprobe", args, nil, &out, os.Stderr)
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe failed: %v", err)
+	}
+
+	str := strings.TrimSpace(out.String())
+	v, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse duration %q: %v", str, err)
+	}
+	return v, nil
+}
+
+func Chunk(ctx context.Context, input, outputPattern string, chunks int, length float64) error {
+	segmentTime := length
+	if chunks > 0 {
+		duration, err := GetVideoDuration(ctx, input)
+		if err != nil {
+			return err
+		}
+		if duration <= 0 {
+			return fmt.Errorf("could not determine video duration")
+		}
+		segmentTime = duration / float64(chunks)
+	}
+	if segmentTime <= 0 {
+		return fmt.Errorf("invalid chunk length: %f", segmentTime)
+	}
+
+	args := []string{
+		"-v", "error",
+		"-i", input,
+		"-c", "copy",
+		"-f", "segment",
+		"-segment_time", fmt.Sprintf("%f", segmentTime),
+		"-reset_timestamps", "1",
+		outputPattern,
+	}
+
+	return RunBinary(ctx, "ffmpeg", args, nil, os.Stdout, os.Stderr)
 }

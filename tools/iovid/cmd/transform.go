@@ -3,28 +3,32 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"iosuite.io/libs/iocore"
 )
 
 var (
-	width      int
-	height     int
-	cropW      int
-	cropH      int
-	cropX      int
-	cropY      int
-	degrees    int
-	axis       string
-	aspect     string
-	level      float64
-	preset     string
-	amount     float64
-	start      string
-	end        string
-	fpsRate    int
-	multiplier float64
+	width       int
+	height      int
+	cropW       int
+	cropH       int
+	cropX       int
+	cropY       int
+	degrees     int
+	axis        string
+	aspect      string
+	level       float64
+	preset      string
+	amount      float64
+	start       string
+	end         string
+	fpsRate     int
+	multiplier  float64
+	chunks      int
+	chunkLength float64
 )
 
 func init() {
@@ -269,4 +273,35 @@ func init() {
 	}
 	speedCmd.Flags().Float64Var(&multiplier, "multiplier", 1.0, "speed multiplier (e.g. 0.5, 2.0)")
 	rootCmd.AddCommand(speedCmd)
+
+	// Chunk
+	chunkCmd := &cobra.Command{
+		Use:   "chunk",
+		Short: "Chunk video into multiple segments",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
+			if !iocore.IsVideo(input) {
+				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
+			}
+			if chunks <= 0 && chunkLength <= 0 {
+				return fmt.Errorf("must specify either --chunks or --length")
+			}
+			if chunks > 0 && chunkLength > 0 {
+				return fmt.Errorf("cannot specify both --chunks and --length")
+			}
+			ctx := context.Background()
+
+			outputPattern := output
+			if !strings.Contains(outputPattern, "%") {
+				ext := filepath.Ext(outputPattern)
+				base := strings.TrimSuffix(outputPattern, ext)
+				outputPattern = fmt.Sprintf("%s_%%03d%s", base, ext)
+			}
+
+			return iocore.Chunk(ctx, input, outputPattern, chunks, chunkLength)
+		},
+	}
+	chunkCmd.Flags().IntVar(&chunks, "chunks", 0, "number of chunks to split the video into")
+	chunkCmd.Flags().Float64Var(&chunkLength, "length", 0, "length of each chunk in seconds")
+	rootCmd.AddCommand(chunkCmd)
 }
