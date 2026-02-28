@@ -25,6 +25,9 @@ ioimg upscale -i <input> [flags]
 | `--provider` | `-p` | (required for start/stop) | Execution provider (`local_cpu`, `local_gpu`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
 | `--model` | `-m` | (required for start/stop) | Upscale model (or `ffmpeg`) |
+| `--volume` | | | RunPod Network Volume ID to use for processing |
+| `--gpu-id` | | `NVIDIA RTX A4000` | Requested GPU type for RunPod |
+| `--keep-failed` | | `false` | Keep the created volume if the job fails |
 | `--json` | | `false` | Output metrics as JSON |
 
 #### Output Path
@@ -171,6 +174,7 @@ ioimg start -m real-esrgan -p runpod --active --data-center US-TX-3 --gpu "NVIDI
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
 | `--data-center` | `EU-RO-1` | Specific RunPod data center ID(s) (comma-separated) |
 | `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
+| `--volume-size` | | Size in GB for a new Network Volume to provision |
 
 ### `ioimg stop`
 
@@ -227,7 +231,10 @@ ioimg upscale provider gpus runpod
 
 ### `ioimg runpod volume`
 
-Manage RunPod network volumes for large media handling.
+Manage RunPod network volumes for large media handling. The serverless workflow automatically uses these volumes to avoid base64 overhead for large files.
+
+- **Direct Upload/Download**: Files are uploaded to the volume via S3, processed locally by the worker in `/workspace`, and then downloaded.
+- **Idempotency**: Volumes are named based on the project/task to ensure consistency across retries.
 
 ```bash
 # Create a 100GB volume in EU-RO-1
