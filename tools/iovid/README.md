@@ -120,6 +120,9 @@ iovid start -p runpod -m ffmpeg
 | `--active` | `false` | Keep at least one worker always running |
 | `--volume-size` | | Size in GB for a new Network Volume |
 
+> [!IMPORTANT]
+> **Credentials**: `RUNPOD_API_KEY` is the primary key. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are **strictly required** for Network Volume access.
+
 ### RunPod Network Volumes
 
 For large videos, `iovid` automatically leverages RunPod Network Volumes to avoid the overhead of base64 encoding.

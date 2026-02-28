@@ -176,6 +176,9 @@ ioimg start -m real-esrgan -p runpod --active --data-center US-TX-3 --gpu "NVIDI
 | `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
 | `--volume-size` | | Size in GB for a new Network Volume to provision |
 
+> [!IMPORTANT]
+> **Authentication**: `RUNPOD_API_KEY` is required for all RunPod operations. For Network Volume S3 access, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are **strictly required**.
+
 ### `ioimg stop`
 
 Stop running processes or tear down cloud resources. **Provider and model flags are required.**

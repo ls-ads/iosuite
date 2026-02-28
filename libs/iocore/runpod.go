@@ -613,12 +613,9 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 
 	// 2. Setup S3 Client
 	s3Access := os.Getenv("AWS_ACCESS_KEY_ID")
-	if s3Access == "" {
-		s3Access = key
-	}
 	s3Secret := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	if s3Secret == "" {
-		s3Secret = key
+	if s3Access == "" || s3Secret == "" {
+		return fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are strictly required for Network Volume access")
 	}
 
 	s3Client, err := NewS3Client(ctx, cfg.Region, s3Access, s3Secret, volumeID)

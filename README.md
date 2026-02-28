@@ -16,8 +16,13 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 2. **Start Infrastructure**: Provision a specialized AI endpoint and Network Volume on RunPod.
    ```bash
-   # Provision an endpoint + a 1GB Network Volume for fast processing of large files
-   ioimg start --model real-esrgan --provider runpod --api-key YOUR_API_KEY --volume-size 1
+    # Set your credentials (volumes REQUIRE AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY)
+    export RUNPOD_API_KEY=YOUR_API_KEY
+    export AWS_ACCESS_KEY_ID=YOUR_POD_USER_ID
+    export AWS_SECRET_ACCESS_KEY=YOUR_POD_S3_SECRET
+   
+   # Provision an endpoint + a 1GB Network Volume
+   ioimg start --model real-esrgan --provider runpod --volume-size 1
    ```
 
 3. **Upscale Media**: Process your images or videos with lightning-fast AI.
