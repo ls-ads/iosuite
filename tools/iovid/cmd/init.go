@@ -4,15 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"iosuite.io/libs/iocore"
-)
-
-var (
-	activeWorkers bool
-	gpuType       string
-	dataCenterIds []string
 )
 
 var startCmd = &cobra.Command{
@@ -81,6 +76,16 @@ var startCmd = &cobra.Command{
 		}
 		fmt.Println("This may take 10+ minutes depending on template size and GPU availability.")
 
+		if volumeSize > 0 {
+			fmt.Printf("Provisioning RunPod Network Volume (%d GB) in %s...\n", volumeSize, dataCenterIds[0])
+			volumeID, err := iocore.CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%s-%d", model, time.Now().Unix()), volumeSize, dataCenterIds[0])
+			if err != nil {
+				return fmt.Errorf("failed to create volume: %v", err)
+			}
+			fmt.Printf("Successfully created RunPod volume!\nVolume ID: %s\n", volumeID)
+			return nil
+		}
+
 		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIds, workersMin)
 		if err != nil {
 			return fmt.Errorf("failed to start infrastructure: %v", err)
@@ -95,6 +100,8 @@ func init() {
 	startCmd.Flags().BoolVar(&activeWorkers, "active", false, "Set endpoint to always active (workersMin=1)")
 	startCmd.Flags().StringSliceVar(&dataCenterIds, "data-center", []string{"EU-RO-1"}, "Direct RunPod data center IDs")
 	startCmd.Flags().StringVar(&gpuType, "gpu", "", "Specific GPU type for RunPod (e.g. 'NVIDIA RTX A4000')")
+	startCmd.Flags().IntVar(&volumeSize, "volume-size", 0, "Provision a network volume of specified size in GB instead of an endpoint")
+	startCmd.Flags().BoolVar(&keepFailed, "keep-failed", false, "Keep resources on failure (for debugging)")
 
 	rootCmd.AddCommand(startCmd)
 }

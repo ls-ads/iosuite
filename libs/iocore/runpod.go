@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -127,16 +129,12 @@ func EnsureRunPodEndpoint(ctx context.Context, key string, config RunPodEndpoint
 
 // RunPodJobResponse represents the response from a RunPod serverless job.
 type RunPodJobResponse struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	DelayTime     int64  `json:"delayTime"`     // queue delay in milliseconds
-	ExecutionTime int64  `json:"executionTime"` // in milliseconds
-	Output        struct {
-		Status       string `json:"status"` // Optional
-		ImageBase64  string `json:"image_base64"`
-		OutputBase64 string `json:"output_base64"`
-	} `json:"output"`
-	Error string `json:"error"`
+	ID            string                 `json:"id"`
+	Status        string                 `json:"status"`
+	DelayTime     int64                  `json:"delayTime"`     // queue delay in milliseconds
+	ExecutionTime int64                  `json:"executionTime"` // in milliseconds
+	Output        map[string]interface{} `json:"output"`
+	Error         string                 `json:"error"`
 }
 
 // NewRunPodEndpointClient creates a RunPod Go SDK endpoint client for the given API key and endpoint ID.
@@ -566,4 +564,145 @@ func ListNetworkVolumes(ctx context.Context, key string) ([]NetworkVolume, error
 	}
 
 	return volumes, nil
+}
+
+// GetS3Endpoint returns the S3-compatible API endpoint for a specific region.
+func GetS3Endpoint(region string) string {
+	regionClean := strings.ToLower(strings.ReplaceAll(region, "_", "-"))
+	return fmt.Sprintf("https://s3api-%s.runpod.io/", regionClean)
+}
+
+// VolumeWorkflowConfig holds configuration for the high-level serverless volume workflow.
+type VolumeWorkflowConfig struct {
+	APIKey         string
+	Region         string
+	EndpointID     string
+	VolumeSizeGB   int
+	VolumeID       string // Optional: if provided, uses existing volume
+	InputLocalPath string
+	OutputLocalDir string
+	TemplateID     string   // For provisioning
+	GPUID          string   // For provisioning
+	FFmpegArgs     string   // For ffmpeg model
+	OutputExt      string   // For ffmpeg model
+	DataCenterIDs  []string // For provisioning
+	KeepFailed     bool
+}
+
+// RunPodServerlessVolumeWorkflow handles the full lifecycle: volume -> upload -> serverless job -> download -> cleanup.
+func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfig, status func(phase, message string)) error {
+	key := cfg.APIKey
+	if key == "" {
+		key = os.Getenv("RUNPOD_API_KEY")
+	}
+
+	// 1. Create/Ensure Volume
+	volumeID := cfg.VolumeID
+	if volumeID == "" {
+		status("infrastructure", "Creating network volume...")
+		vid, err := CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%d", time.Now().Unix()), cfg.VolumeSizeGB, cfg.Region)
+		if err != nil {
+			return fmt.Errorf("failed to create volume: %v", err)
+		}
+		volumeID = vid
+		status("infrastructure", fmt.Sprintf("Created volume: %s", volumeID))
+
+		// Settle time for RunPod volume to be ready for S3
+		time.Sleep(5 * time.Second)
+	}
+
+	// 2. Setup S3 Client
+	s3Access := os.Getenv("AWS_ACCESS_KEY_ID")
+	if s3Access == "" {
+		s3Access = key
+	}
+	s3Secret := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	if s3Secret == "" {
+		s3Secret = key
+	}
+
+	s3Client, err := NewS3Client(ctx, cfg.Region, s3Access, s3Secret, volumeID)
+	if err != nil {
+		return fmt.Errorf("failed to setup S3 client: %v", err)
+	}
+
+	// 3. Upload Input
+	inputFileName := filepath.Base(cfg.InputLocalPath)
+	status("upload", fmt.Sprintf("Uploading %s to volume...", inputFileName))
+	if err := s3Client.UploadFile(ctx, cfg.InputLocalPath, inputFileName); err != nil {
+		return fmt.Errorf("upload failed: %v", err)
+	}
+
+	// 4. Ensure Endpoint exists (if we have provisioning info)
+	endpointID := cfg.EndpointID
+	if endpointID == "" && cfg.TemplateID != "" {
+		status("infrastructure", "Provisioning serverless endpoint...")
+		modelCfg := ModelConfig{
+			TemplateID: cfg.TemplateID,
+			GPUIDs:     []string{cfg.GPUID},
+		}
+		eid, err := ProvisionRunPodModel(ctx, key, "workflow", modelCfg, cfg.DataCenterIDs, 0)
+		if err != nil {
+			return fmt.Errorf("failed to provision endpoint: %v", err)
+		}
+		endpointID = eid
+	}
+
+	if endpointID == "" {
+		return fmt.Errorf("endpoint ID is required for serverless workflow")
+	}
+
+	// 5. Submit Serverless Job
+	outputFileName := "out_" + inputFileName
+	if cfg.OutputExt != "" {
+		ext := filepath.Ext(outputFileName)
+		outputFileName = strings.TrimSuffix(outputFileName, ext) + "." + cfg.OutputExt
+	}
+
+	status("processing", "Submitting serverless job...")
+
+	// Construct input payload based on the handler's expectations
+	input := map[string]interface{}{}
+
+	// Check if this is for ffmpeg or real-esrgan (image vs media)
+	// We'll use broad keys that the updated handlers support
+	if strings.Contains(cfg.EndpointID, "img") || cfg.TemplateID == "047z8w5i69" {
+		input["image_path"] = inputFileName
+		input["output_path"] = outputFileName
+	} else {
+		input["input_path"] = inputFileName
+		input["output_path"] = outputFileName
+		if cfg.FFmpegArgs != "" {
+			input["ffmpeg_args"] = cfg.FFmpegArgs
+		}
+	}
+
+	job, err := RunRunPodJobSync(ctx, key, endpointID, input, func(phase, message string, elapsed time.Duration) {
+		status(phase, message)
+	})
+	if err != nil {
+		return fmt.Errorf("serverless job failed: %v", err)
+	}
+
+	// 6. Download Output
+	status("download", "Downloading result from volume...")
+	downloadPath := filepath.Join(cfg.OutputLocalDir, outputFileName)
+
+	// If the job returned a specific output_path, use that
+	remoteOut := outputFileName
+	if outPath, ok := job.Output["output_path"].(string); ok && outPath != "" {
+		remoteOut = outPath
+	}
+
+	if err := s3Client.DownloadFile(ctx, remoteOut, downloadPath); err != nil {
+		return fmt.Errorf("download failed: %v", err)
+	}
+
+	// 7. Cleanup (Optional)
+	if !cfg.KeepFailed {
+		status("cleanup", "Cleaning up network volume...")
+		_ = DeleteNetworkVolume(ctx, key, volumeID)
+	}
+
+	return nil
 }

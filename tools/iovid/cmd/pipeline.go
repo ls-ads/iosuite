@@ -28,9 +28,13 @@ Example: iovid pipeline -i in.mp4 -o out.mp4 --ops "scale=1280x720,brighten=0.1,
 
 			ctx := context.Background()
 			cfg := &iocore.FFmpegConfig{
-				Provider: iocore.UpscaleProvider(provider),
-				APIKey:   apiKey,
-				Model:    model,
+				Provider:      iocore.UpscaleProvider(provider),
+				APIKey:        apiKey,
+				Model:         model,
+				Volume:        volume,
+				GPUID:         gpuType,
+				DataCenterIDs: dataCenterIds,
+				KeepFailed:    keepFailed,
 			}
 
 			pipe := iocore.NewPipeline(ctx, cfg, input, output)

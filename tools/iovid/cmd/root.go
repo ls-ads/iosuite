@@ -10,6 +10,14 @@ var (
 	provider string
 	apiKey   string
 	model    string
+	volume   string
+
+	// Shared RunPod flags
+	activeWorkers bool
+	gpuType       string
+	dataCenterIds []string
+	volumeSize    int
+	keepFailed    bool
 )
 
 var rootCmd = &cobra.Command{
@@ -37,4 +45,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&provider, "provider", "p", "", "Execution provider (local_cpu, local_gpu, runpod)")
 	rootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "", "Model name")
+	rootCmd.PersistentFlags().StringVar(&volume, "volume", "", "RunPod volume ID or size in GB for the volume workflow")
 }

@@ -20,6 +20,10 @@ type FFmpegConfig struct {
 	APIKey         string
 	Model          string // Default "ffmpeg"
 	StatusCallback func(RunPodStatusUpdate)
+	Volume         string   // RunPod volume ID or size in GB
+	GPUID          string   // Requested GPU type
+	DataCenterIDs  []string // Preferred data centers
+	KeepFailed     bool
 }
 
 // RunFFmpegAction executes an FFmpeg command with the given input, output, filter, and extra arguments.
@@ -34,10 +38,83 @@ func RunFFmpegAction(ctx context.Context, config *FFmpegConfig, input string, ou
 	}
 
 	if p == ProviderRunPod {
+		if config.Volume != "" {
+			return runRunPodVolumeFFmpeg(ctx, config, input, output, filter, extraArgs)
+		}
 		return runRunPodFFmpeg(ctx, config, input, output, filter, extraArgs)
 	}
 
 	return fmt.Errorf("unsupported provider: %s", p)
+}
+
+func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, output, filter string, extraArgs []string) error {
+	Info("Running FFmpeg on RunPod via Volume Workflow", "input", input, "volume", config.Volume)
+
+	// 1. Resolve Model Config (Template + GPUs)
+	gpuIDs := config.GPUID
+	if gpuIDs == "" {
+		gpuIDs = "NVIDIA RTX A4000" // Default
+	}
+
+	var templateID string
+	if config.Model == "ffmpeg" || config.Model == "" {
+		templateID = "uduo7jdyhn"
+	} else if config.Model == "real-esrgan" {
+		templateID = "047z8w5i69"
+	} else {
+		return fmt.Errorf("unsupported model for Volume workflow: %s", config.Model)
+	}
+
+	// 2. Prepare Workflow Config
+	volWorkflowCfg := VolumeWorkflowConfig{
+		APIKey:         config.APIKey,
+		TemplateID:     templateID,
+		GPUID:          gpuIDs,
+		InputLocalPath: input,
+		OutputLocalDir: filepath.Dir(output),
+		KeepFailed:     config.KeepFailed,
+	}
+
+	if len(config.DataCenterIDs) > 0 {
+		volWorkflowCfg.Region = config.DataCenterIDs[0]
+	} else {
+		volWorkflowCfg.Region = "EU-RO-1" // Default
+	}
+
+	// Parse Volume ID or Size
+	if size, err := strconv.Atoi(config.Volume); err == nil {
+		volWorkflowCfg.VolumeSizeGB = size
+	} else {
+		volWorkflowCfg.VolumeID = config.Volume
+	}
+
+	// 3. Execution wrapper
+	statusFunc := func(phase, message string) {
+		if config.StatusCallback != nil {
+			config.StatusCallback(RunPodStatusUpdate{Phase: phase, Message: message})
+		}
+	}
+
+	volWorkflowCfg.FFmpegArgs = strings.Join(extraArgs, ",")
+	if filter != "" {
+		if volWorkflowCfg.FFmpegArgs != "" {
+			volWorkflowCfg.FFmpegArgs = "-vf," + filter + "," + volWorkflowCfg.FFmpegArgs
+		} else {
+			volWorkflowCfg.FFmpegArgs = "-vf," + filter
+		}
+	}
+	volWorkflowCfg.OutputExt = strings.TrimPrefix(filepath.Ext(output), ".")
+
+	err := RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, statusFunc)
+	if err != nil {
+		return err
+	}
+
+	// The workflow downloads the results to OutputLocalDir.
+	// We might need to rename the file if OutputLocalDir contains something else.
+	// For now, we assume the output file name in S3 matches the expected local base name.
+
+	return nil
 }
 
 func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string, output string, filter string, extraArgs []string) error {
@@ -162,12 +239,11 @@ func runRunPodFFmpeg(ctx context.Context, config *FFmpegConfig, input string, ou
 	}
 
 	// 5. Decode output
-	// 5. Decode output
 	var base64Out string
-	if job.Output.OutputBase64 != "" {
-		base64Out = job.Output.OutputBase64
-	} else if job.Output.ImageBase64 != "" {
-		base64Out = job.Output.ImageBase64
+	if out, ok := job.Output["output_base64"].(string); ok {
+		base64Out = out
+	} else if out, ok := job.Output["image_base64"].(string); ok {
+		base64Out = out
 	}
 
 	if base64Out == "" {

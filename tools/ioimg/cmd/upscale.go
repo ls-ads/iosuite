@@ -20,9 +20,6 @@ var (
 	outputFormat    string
 	recursive       bool
 	continueOnError bool
-	activeWorkers   bool
-	gpuType         string
-	dataCenterIds   []string
 )
 
 type batchMetrics struct {
@@ -82,9 +79,13 @@ var upscaleCmd = &cobra.Command{
 		}
 
 		config := iocore.UpscaleConfig{
-			Provider: iocore.UpscaleProvider(provider),
-			APIKey:   apiKey,
-			Model:    model,
+			Provider:      iocore.UpscaleProvider(provider),
+			APIKey:        apiKey,
+			Model:         model,
+			Volume:        volume,
+			GPUID:         gpuType,
+			DataCenterIDs: dataCenterIds,
+			KeepFailed:    keepFailed,
 		}
 
 		return processPath(input, output, &config)

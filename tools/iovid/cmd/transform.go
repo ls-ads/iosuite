@@ -36,6 +36,18 @@ var (
 	crf         string
 )
 
+func makeFFmpegConfig() *iocore.FFmpegConfig {
+	return &iocore.FFmpegConfig{
+		Provider:      iocore.UpscaleProvider(provider),
+		APIKey:        apiKey,
+		Model:         model,
+		Volume:        volume,
+		GPUID:         gpuType,
+		DataCenterIDs: dataCenterIds,
+		KeepFailed:    keepFailed,
+	}
+}
+
 func init() {
 	// Scale
 	scaleCmd := &cobra.Command{
@@ -47,7 +59,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Scale(ctx, cfg, input, output, width, height)
 		},
 	}
@@ -65,7 +77,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Crop(ctx, cfg, input, output, cropW, cropH, cropX, cropY)
 		},
 	}
@@ -85,7 +97,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Rotate(ctx, cfg, input, output, degrees)
 		},
 	}
@@ -102,7 +114,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Flip(ctx, cfg, input, output, axis)
 		},
 	}
@@ -119,7 +131,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Pad(ctx, cfg, input, output, aspect)
 		},
 	}
@@ -136,7 +148,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Brighten(ctx, cfg, input, output, level)
 		},
 	}
@@ -153,7 +165,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Contrast(ctx, cfg, input, output, level)
 		},
 	}
@@ -170,7 +182,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Saturate(ctx, cfg, input, output, level)
 		},
 	}
@@ -187,7 +199,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Denoise(ctx, cfg, input, output, preset)
 		},
 	}
@@ -204,7 +216,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Sharpen(ctx, cfg, input, output, amount)
 		},
 	}
@@ -221,7 +233,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Trim(ctx, cfg, input, output, start, end)
 		},
 	}
@@ -239,7 +251,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.FPS(ctx, cfg, input, output, fpsRate)
 		},
 	}
@@ -256,7 +268,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Mute(ctx, cfg, input, output)
 		},
 	}
@@ -272,7 +284,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Speed(ctx, cfg, input, output, multiplier)
 		},
 	}
@@ -320,7 +332,7 @@ func init() {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Transcode(ctx, cfg, input, output, vcodec, acodec, vbitrate, abitrate, crf)
 		},
 	}
@@ -345,7 +357,7 @@ func init() {
 				}
 			}
 			ctx := context.Background()
-			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			cfg := makeFFmpegConfig()
 			return iocore.Concat(ctx, cfg, args, output)
 		},
 	}
