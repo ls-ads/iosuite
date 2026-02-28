@@ -50,7 +50,10 @@ Use `--format` to override for all files:
 
 ```bash
 # Convert all outputs to PNG regardless of input
-ioimg upscale -i photos/ -f png -p runpod
+ioimg upscale \
+  -i photos/ \
+  -f png \
+  -p runpod
 ```
 
 #### Supported Input Formats
@@ -66,7 +69,10 @@ By default, only top-level files in a directory are processed. Use `--recursive`
 ioimg upscale -i photos/ -p runpod
 
 # Include subdirectories
-ioimg upscale -i photos/ -r -p runpod
+ioimg upscale \
+  -i photos/ \
+  -r \
+  -p runpod
 ```
 
 #### Resume / Overwrite
@@ -81,7 +87,10 @@ ioimg upscale -i photos/ -p runpod
 ioimg upscale -i photos/ -p runpod
 
 # Force reprocessing of everything
-ioimg upscale -i photos/ -p runpod --overwrite
+ioimg upscale \
+  -i photos/ \
+  -p runpod \
+  --overwrite
 ```
 
 #### Error Handling
@@ -97,7 +106,10 @@ To process all files regardless of individual failures, use `--continue-on-error
 ioimg upscale -i photos/ -p runpod
 
 # Keep going even if some files fail
-ioimg upscale -i photos/ -p runpod --continue-on-error
+ioimg upscale \
+  -i photos/ \
+  -p runpod \
+  --continue-on-error
 ```
 
 #### Examples
@@ -107,13 +119,21 @@ ioimg upscale -i photos/ -p runpod --continue-on-error
 ioimg upscale -i photo.jpg
 
 # Upscale with RunPod, output to specific path
-ioimg upscale -i photo.jpg -o upscaled.png -f png -p runpod
+ioimg upscale \
+  -i photo.jpg \
+  -o upscaled.png \
+  -f png \
+  -p runpod
 
 # Batch upscale a directory
 ioimg upscale -i photos/ -p runpod
 
 # Batch upscale recursively with JSON output
-ioimg upscale -i photos/ -r -p runpod --json
+ioimg upscale \
+  -i photos/ \
+  -r \
+  -p runpod \
+  --json
 ```
 
 #### Metrics
@@ -163,7 +183,12 @@ Provision cloud infrastructure for the selected model. Currently supports RunPod
 ioimg start -p runpod -m ffmpeg
 
 # Start always-active infrastructure for real-esrgan in a specific data center
-ioimg start -m real-esrgan -p runpod --active --data-center US-TX-3 --gpu "NVIDIA RTX A5000"
+ioimg start \
+  -m real-esrgan \
+  -p runpod \
+  --active \
+  --data-center US-TX-3 \
+  --gpu "NVIDIA RTX A5000"
 ```
 
 | Flag | Default | Description |
@@ -229,7 +254,10 @@ List available GPUs for a specific provider. This is useful for finding the corr
 
 ```bash
 # List all available GPUs for RunPod
-ioimg upscale provider gpus runpod
+ioimg upscale \
+  provider \
+  gpus \
+  runpod
 ```
 
 ### `ioimg runpod volume`
@@ -241,7 +269,10 @@ Manage RunPod network volumes for large media handling. The serverless workflow 
 
 ```bash
 # Create a 100GB volume in EU-RO-1
-ioimg runpod volume create --name my-media --size 100 --data-center EU-RO-1
+ioimg runpod volume create \
+  --name my-media \
+  --size 100 \
+  --data-center EU-RO-1
 
 # List all volumes
 ioimg runpod volume list
@@ -267,10 +298,17 @@ Run multiple transformations chained together in a single execution pass. This i
 
 ```bash
 # Locally using GPU (default)
-ioimg pipeline -i photo.jpg -o photo_ready.jpg --ops "scale=1920x1080,brighten=0.05,contrast=10"
+ioimg pipeline \
+  -i photo.jpg \
+  -o photo_ready.jpg \
+  --ops "scale=1920x1080,brighten=0.05,contrast=10"
 
 # Remotely on RunPod
-ioimg pipeline -i photo.jpg -o photo_ready.jpg -p runpod --ops "rotate=90,scale=1080x1920"
+ioimg pipeline \
+  -i photo.jpg \
+  -o photo_ready.jpg \
+  -p runpod \
+  --ops "rotate=90,scale=1080x1920"
 ```
 
 | Flag | Description |
@@ -294,7 +332,11 @@ Executes tasks on RunPod serverless endpoints. Requires an API key and infrastru
 
 ```bash
 # Scale an image
-ioimg scale -i photo.jpg -o photo_scaled.jpg --width 1920 --height 1080
+ioimg scale \
+  -i photo.jpg \
+  -o photo_scaled.jpg \
+  --width 1920 \
+  --height 1080
 
 # Adjust contrast (-100 to 100)
 ioimg contrast -i photo.jpg -o photo_crisp.jpg --level 20
@@ -315,7 +357,10 @@ ioimg denoise -i photo.jpg -o photo_clean.jpg --preset strong
 ioimg sharpen -i photo.jpg -o photo_sharp.jpg --amount 2.0
 
 # Combine frames into a video
-ioimg combine -i ./frames/frame_%05d.png -o output.mp4 --fps 30
+ioimg combine \
+  -i ./frames/frame_%05d.png \
+  -o output.mp4 \
+  --fps 30
 ```
 
 ### `ioimg list`

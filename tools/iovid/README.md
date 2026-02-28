@@ -34,7 +34,10 @@
 Chain multiple video transformations in a single pass to save time and reduce I/O.
 
 ```bash
-iovid pipeline -i input.mp4 -o output.mp4 --ops "trim=00:00:10-00:00:20,scale=1280x720,brighten=0.1"
+iovid pipeline \
+  -i input.mp4 \
+  -o output.mp4 \
+  --ops "trim=00:00:10-00:00:20,scale=1280x720,brighten=0.1"
 ```
 
 | Flag | Description |
@@ -46,34 +49,65 @@ Supported ops: `scale=WxH`, `crop=WxHxXxY`, `rotate=DEG`, `flip=v/h`, `brighten=
 ### Geometric Transformations
 ```bash
 # Scale video
-iovid scale -i input.mp4 -o output.mp4 --width 1920 --height 1080
+iovid scale \
+  -i input.mp4 \
+  -o output.mp4 \
+  --width 1920 \
+  --height 1080
 
 # Crop video
-iovid crop -i input.mp4 -o output.mp4 --w 1280 --h 720 --x 100 --y 100
+iovid crop \
+  -i input.mp4 \
+  -o output.mp4 \
+  --w 1280 \
+  --h 720 \
+  --x 100 \
+  --y 100
 
 # Rotate video
-iovid rotate -i input.mp4 -o output.mp4 --degrees 90
+iovid rotate \
+  -i input.mp4 \
+  -o output.mp4 \
+  --degrees 90
 ```
 
 ### Visual Adjustments
 ```bash
 # Adjust brightness (-1.0 to 1.0)
-iovid brighten -i input.mp4 -o output.mp4 --level 0.2
+iovid brighten \
+  -i input.mp4 \
+  -o output.mp4 \
+  --level 0.2
 
 # Flip video (h or v)
-iovid flip -i input.mp4 -o output.mp4 --axis h
+iovid flip \
+  -i input.mp4 \
+  -o output.mp4 \
+  --axis h
 
 # Pad video to aspect ratio
-iovid pad -i input.mp4 -o output.mp4 --aspect 1:1
+iovid pad \
+  -i input.mp4 \
+  -o output.mp4 \
+  --aspect 1:1
 
 # Adjust saturation (0 to 3)
-iovid saturate -i input.mp4 -o output.mp4 --level 1.5
+iovid saturate \
+  -i input.mp4 \
+  -o output.mp4 \
+  --level 1.5
 
 # Denoise video (presets: weak, med, strong)
-iovid denoise -i input.mp4 -o output.mp4 --preset med
+iovid denoise \
+  -i input.mp4 \
+  -o output.mp4 \
+  --preset med
 
 # Sharpen video (0 to 5)
-iovid sharpen -i input.mp4 -o output.mp4 --amount 1.2
+iovid sharpen \
+  -i input.mp4 \
+  -o output.mp4 \
+  --amount 1.2
 ```
 
 For full cross-platform installation instructions, including shell autocompletion for Bash, Zsh, Fish, and PowerShell, please refer to the [Root Installation Guide](../../README.md#️-installation--shell-completion).
@@ -81,16 +115,26 @@ For full cross-platform installation instructions, including shell autocompletio
 ### Temporal & Stream Operations
 ```bash
 # Trim video
-iovid trim -i input.mp4 -o output.mp4 --start 00:00:10 --end 00:00:20
+iovid trim \
+  -i input.mp4 \
+  -o output.mp4 \
+  --start 00:00:10 \
+  --end 00:00:20
 
 # Change frame rate
-iovid fps -i input.mp4 -o output.mp4 --rate 24
+iovid fps \
+  -i input.mp4 \
+  -o output.mp4 \
+  --rate 24
 
 # Remove audio
 iovid mute -i input.mp4 -o output.mp4
 
 # Change video speed (multiplier)
-iovid speed -i input.mp4 -o output.mp4 --multiplier 2.0
+iovid speed \
+  -i input.mp4 \
+  -o output.mp4 \
+  --multiplier 2.0
 ```
 
 ### Bridge Commands
@@ -102,14 +146,20 @@ iovid extract-frames -i input.mp4 -o ./frames/
 iovid extract-audio -i input.mp4 -o audio.mp3
 
 # Stack two videos side-by-side
-iovid stack -i original.mp4 -i2 modified.mp4 -o comparison.mp4 --axis h
+iovid stack \
+  -i original.mp4 \
+  -i2 modified.mp4 \
+  -o comparison.mp4 \
+  --axis h
 ```
 
 Provision cloud infrastructure for the selected model. Currently supports RunPod. **Provider and model flags are required.**
 
 ```bash
 # Start RunPod infrastructure for ffmpeg
-iovid start -p runpod -m ffmpeg
+iovid start \
+  -p runpod \
+  -m ffmpeg
 ```
 
 | Flag | Default | Description |
@@ -137,10 +187,14 @@ Stop running processes or tear down cloud resources. **Provider and model flags 
 
 ```bash
 # Stop local FFmpeg processes
-iovid stop -p local_gpu -m ffmpeg
+iovid stop \
+  -p local_gpu \
+  -m ffmpeg
 
 # Tear down RunPod endpoints
-iovid stop -p runpod -m ffmpeg
+iovid stop \
+  -p runpod \
+  -m ffmpeg
 ```
 
 ## Requirements
