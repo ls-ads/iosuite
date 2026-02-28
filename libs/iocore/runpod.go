@@ -478,6 +478,9 @@ func CreateNetworkVolume(ctx context.Context, key, name string, sizeGB int, data
 		"size":         sizeGB,
 		"dataCenterId": dataCenterID,
 	}
+	if sizeGB < 10 {
+		return "", fmt.Errorf("RunPod network volume size must be at least 10GB")
+	}
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {

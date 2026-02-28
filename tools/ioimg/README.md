@@ -199,7 +199,7 @@ ioimg start \
 | `--active` | `false` | Keep at least one worker always running (`workersMin=1`) |
 | `--data-center` | `EU-RO-1` | Specific RunPod data center ID(s) (comma-separated) |
 | `--gpu` | | Specific RunPod GPU type (e.g. `NVIDIA RTX A4000`) |
-| `--volume-size` | | Size in GB for a new Network Volume to provision |
+| `--volume-size` | | Size in GB for a new Network Volume to provision (min 10) |
 
 > [!IMPORTANT]
 > **Authentication**: `RUNPOD_API_KEY` is required for all RunPod operations. For Network Volume S3 access, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are **strictly required**.

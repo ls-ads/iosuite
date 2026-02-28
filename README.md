@@ -21,11 +21,11 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
     export AWS_ACCESS_KEY_ID=YOUR_POD_USER_ID
     export AWS_SECRET_ACCESS_KEY=YOUR_POD_S3_SECRET
    
-   # Provision an endpoint + a 1GB Network Volume
+   # Provision an endpoint + a 10GB Network Volume (RunPod minimum)
    ioimg start \
      --model real-esrgan \
      --provider runpod \
-     --volume-size 1
+     --volume-size 10
    ```
 
 3. **Upscale Media**: Process your images or videos with lightning-fast AI.
