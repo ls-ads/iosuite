@@ -29,6 +29,11 @@ var (
 	multiplier  float64
 	chunks      int
 	chunkLength float64
+	vcodec      string
+	acodec      string
+	vbitrate    string
+	abitrate    string
+	crf         string
 )
 
 func init() {
@@ -304,4 +309,25 @@ func init() {
 	chunkCmd.Flags().IntVar(&chunks, "chunks", 0, "number of chunks to split the video into")
 	chunkCmd.Flags().Float64Var(&chunkLength, "length", 0, "length of each chunk in seconds")
 	rootCmd.AddCommand(chunkCmd)
+
+	// Transcode
+	transcodeCmd := &cobra.Command{
+		Use:   "transcode",
+		Short: "Transcode video and audio streams",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
+			if !iocore.IsVideo(input) {
+				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
+			}
+			ctx := context.Background()
+			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			return iocore.Transcode(ctx, cfg, input, output, vcodec, acodec, vbitrate, abitrate, crf)
+		},
+	}
+	transcodeCmd.Flags().StringVar(&vcodec, "vcodec", "", "video codec (e.g. h264, hevc, av1, vp9)")
+	transcodeCmd.Flags().StringVar(&acodec, "acodec", "", "audio codec (e.g. aac, mp3, opus)")
+	transcodeCmd.Flags().StringVar(&vbitrate, "vbitrate", "", "video bitrate (e.g. 5M, 1000k)")
+	transcodeCmd.Flags().StringVar(&abitrate, "abitrate", "", "audio bitrate (e.g. 128k, 192k)")
+	transcodeCmd.Flags().StringVar(&crf, "crf", "", "constant rate factor (e.g. 23, 28, 35)")
+	rootCmd.AddCommand(transcodeCmd)
 }

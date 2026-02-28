@@ -281,6 +281,102 @@ func Trim(ctx context.Context, config *FFmpegConfig, input, output string, start
 	return RunFFmpegAction(ctx, config, input, output, "", extraArgs)
 }
 
+func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec, acodec, vbitrate, abitrate, crf string) error {
+	var extraArgs []string
+
+	p := ProviderLocalGPU
+	if config != nil && config.Provider != "" {
+		p = config.Provider
+	}
+	isGPU := p == ProviderLocalGPU
+
+	// Video Codec
+	if vcodec != "" {
+		resolvedVCodec := vcodec
+		if isGPU {
+			switch vcodec {
+			case "h264":
+				if runtime.GOOS == "darwin" {
+					resolvedVCodec = "h264_videotoolbox"
+				} else {
+					resolvedVCodec = "h264_nvenc"
+					extraArgs = append(extraArgs, "-preset", "p4", "-tune", "hq")
+				}
+			case "hevc":
+				if runtime.GOOS == "darwin" {
+					resolvedVCodec = "hevc_videotoolbox"
+				} else {
+					resolvedVCodec = "hevc_nvenc"
+					extraArgs = append(extraArgs, "-preset", "p4", "-tune", "hq")
+				}
+			case "av1":
+				if runtime.GOOS == "darwin" {
+					// VideoToolbox AV1 encoding is only on very recent Macs (M3+), fallback to standard if needed
+				} else {
+					resolvedVCodec = "av1_nvenc"
+					extraArgs = append(extraArgs, "-preset", "p4", "-tune", "hq")
+				}
+			}
+		} else {
+			// CPU Encoders
+			switch vcodec {
+			case "h264":
+				resolvedVCodec = "libx264"
+			case "hevc":
+				resolvedVCodec = "libx265"
+			case "av1":
+				resolvedVCodec = "libsvtav1"
+				extraArgs = append(extraArgs, "-preset", "6") // Good default for SVT-AV1
+			case "vp9":
+				resolvedVCodec = "libvpx-vp9"
+			}
+		}
+
+		extraArgs = append(extraArgs, "-c:v", resolvedVCodec)
+	} else {
+		extraArgs = append(extraArgs, "-c:v", "copy")
+	}
+
+	// Audio Codec
+	if acodec != "" {
+		extraArgs = append(extraArgs, "-c:a", acodec)
+	} else {
+		extraArgs = append(extraArgs, "-c:a", "copy")
+	}
+
+	if vbitrate != "" {
+		extraArgs = append(extraArgs, "-b:v", vbitrate)
+	}
+	if abitrate != "" {
+		extraArgs = append(extraArgs, "-b:a", abitrate)
+	}
+	if crf != "" {
+		extraArgs = append(extraArgs, "-crf", crf)
+	}
+
+	// We can't use RunFFmpegAction for transcode because it forces -hwaccel cuda
+	// which applies to all inputs, and some codecs are output-only (ffmpeg-serve
+	// chokes on "Option hwaccel cannot be applied to output url").
+	// We'll execute RunBinary directly.
+
+	args := []string{"-hide_banner", "-loglevel", "error"}
+
+	if isGPU {
+		if runtime.GOOS == "darwin" {
+			args = append(args, "-hwaccel", "videotoolbox")
+		} else {
+			args = append(args, "-hwaccel", "cuda")
+			// Remove -hwaccel_output_format cuda since we are changing codecs and might need software filters/scaling beforehand.
+		}
+	}
+
+	args = append(args, "-i", input)
+	args = append(args, extraArgs...)
+	args = append(args, "-y", output)
+
+	return RunBinary(ctx, "ffmpeg", args, nil, os.Stdout, os.Stderr)
+}
+
 func FPS(ctx context.Context, config *FFmpegConfig, input, output string, rate int) error {
 	filter := fmt.Sprintf("fps=fps=%d", rate)
 	return RunFFmpegAction(ctx, config, input, output, filter, nil)
