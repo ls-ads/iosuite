@@ -15,6 +15,9 @@ build-cli:
 	@mkdir -p $(BIN_DIR)
 	go build -o $(BIN_DIR)/ioimg ./$(TOOLS_DIR)/ioimg
 	go build -o $(BIN_DIR)/iovid ./$(TOOLS_DIR)/iovid
+	@# Also update arch-specific binaries for local dev convenience
+	cp $(BIN_DIR)/ioimg $(BIN_DIR)/ioimg-linux-amd64
+	cp $(BIN_DIR)/iovid $(BIN_DIR)/iovid-linux-amd64
 
 build-lib:
 	@mkdir -p $(BIN_DIR)

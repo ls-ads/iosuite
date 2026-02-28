@@ -83,7 +83,7 @@ var startCmd = &cobra.Command{
 				return fmt.Errorf("failed to create volume: %v", err)
 			}
 			fmt.Printf("Successfully created RunPod volume!\nVolume ID: %s\n", volumeID)
-			return nil
+			// Continue to provision the endpoint as well
 		}
 
 		endpointID, err := iocore.ProvisionRunPodModel(ctx, key, model, modelCfg, dataCenterIds, workersMin)
