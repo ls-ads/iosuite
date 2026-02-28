@@ -40,13 +40,21 @@ func TestResolveBinaryFFmpeg(t *testing.T) {
 
 	path, err := ResolveBinary("ffmpeg")
 	if err == nil {
-		// If it's found (e.g. in system path as ffmpeg-serve), that's fine too.
-		t.Logf("ffmpeg-serve found at: %s", path)
+		t.Errorf("expected error when resolving 'ffmpeg', got path: %s", path)
 	} else {
-		// Expect the "ioimg install -m ffmpeg" hint
-		expectedHint := "ioimg install -m ffmpeg"
+		expectedHint := "direct usage of 'ffmpeg' is banned"
 		if !contains(err.Error(), expectedHint) {
 			t.Errorf("expected error to contain %q, got: %v", expectedHint, err)
+		}
+	}
+
+	pathServe, errServe := ResolveBinary("ffmpeg-serve")
+	if errServe == nil {
+		t.Logf("ffmpeg-serve found at: %s", pathServe)
+	} else {
+		expectedHint := "ioimg install -m ffmpeg"
+		if !contains(errServe.Error(), expectedHint) {
+			t.Errorf("expected error to contain %q, got: %v", expectedHint, errServe)
 		}
 	}
 }

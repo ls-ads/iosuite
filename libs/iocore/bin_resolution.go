@@ -13,8 +13,12 @@ func ResolveBinary(name string) (string, error) {
 	home, _ := os.UserHomeDir()
 	binDir := filepath.Join(home, ".iosuite", "bin")
 
-	// 1. If it's ffmpeg, we ALWAYS want to use ffmpeg-serve for consistency
+	// 1. Explicitly ban "ffmpeg" to avoid accidental system ffmpeg usage
 	if name == "ffmpeg" {
+		return "", fmt.Errorf("direct usage of 'ffmpeg' is banned. Please explicitly use 'ffmpeg-serve'")
+	}
+
+	if name == "ffmpeg-serve" {
 		target := "ffmpeg-serve"
 		if os.PathSeparator == '\\' {
 			target += ".exe"

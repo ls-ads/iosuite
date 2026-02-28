@@ -59,7 +59,12 @@ func Stack(ctx context.Context, config *FFmpegConfig, input1, input2, output str
 		"-y", output,
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	binPath, err := ResolveBinary("ffmpeg-serve")
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 
