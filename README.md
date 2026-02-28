@@ -6,7 +6,7 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 
 ---
 
-## Quick Start (In 3 Commands)
+## Quick Start
 
 1. **Install CLI**: Download the tools + autocompletions in one go.
    ```bash
