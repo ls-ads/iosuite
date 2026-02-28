@@ -31,36 +31,41 @@ for dep in "${DEPENDENCIES[@]}"; do
 done
 
 # --- 2. Binary Resolution ---
-echo "Locating $BINARY_NAME binary..."
-BINARY=""
+echo "Locating binaries..."
 
-# Check PATH first
-if command -v "$BINARY_NAME" &> /dev/null; then
-    BINARY=$(command -v "$BINARY_NAME")
-# Check local bin directory
-elif [[ -f "./bin/$BINARY_NAME" ]]; then
-    BINARY="./bin/$BINARY_NAME"
-# Check for cross-compiled names
-else
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        TARGET="./bin/ioimg-linux-amd64"
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        TARGET="./bin/ioimg-darwin-arm64"
-    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-        TARGET="./bin/ioimg-windows-amd64.exe"
+resolve_binary() {
+    local name=$1
+    local bin=""
+    if [[ -f "./bin/$name" ]]; then
+        bin="./bin/$name"
+    else
+        local target=""
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            target="./bin/${name}-linux-amd64"
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            target="./bin/${name}-darwin-arm64"
+        elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+            target="./bin/${name}-windows-amd64.exe"
+        fi
+        if [[ -f "$target" ]]; then
+            bin="$target"
+        elif command -v "$name" &> /dev/null; then
+            bin=$(command -v "$name")
+        fi
     fi
-    
-    if [[ -f "$TARGET" ]]; then
-        BINARY="$TARGET"
-    fi
-fi
+    echo "$bin"
+}
 
-if [[ -z "$BINARY" ]]; then
-    echo "Error: $BINARY_NAME binary not found."
+BINARY_IOIMG=$(resolve_binary "ioimg")
+BINARY_IOVID=$(resolve_binary "iovid")
+
+if [[ -z "$BINARY_IOIMG" ]] || [[ -z "$BINARY_IOVID" ]]; then
+    echo "Error: ioimg or iovid binary not found."
     echo "   Run 'make build' or download the release from $REPO_URL/releases"
     exit 1
 fi
-echo "Using binary: $BINARY"
+echo "Using ioimg: $BINARY_IOIMG"
+echo "Using iovid: $BINARY_IOVID"
 
 # --- 3. Asset Provisioning ---
 if [[ ! -f "examples/portrait.png" ]]; then
@@ -93,15 +98,38 @@ mkdir -p examples/output/crop
 
 # 1. Upscale Portrait (CPU)
 echo "Testing: upscale (portrait)..."
-$BINARY upscale -i examples/portrait.png -o examples/output/upscale/portrait_4x.png -p local_cpu -m ffmpeg --overwrite
+$BINARY_IOIMG upscale -i examples/portrait.png -o examples/output/upscale/portrait_4x.png -p local_cpu -m ffmpeg --overwrite
 
 # 2. Scale Landscape (CPU)
 echo "Testing: scale (landscape)..."
-$BINARY scale -i examples/landscape.png -o examples/output/scale/landscape_1080p.png --width 1920 --height 1080 -p local_cpu --overwrite
+$BINARY_IOIMG scale -i examples/landscape.png -o examples/output/scale/landscape_1080p.png --width 1920 --height 1080 -p local_cpu --overwrite
 
 # 3. Crop Portrait (CPU)
 echo "Testing: crop (portrait face)..."
-$BINARY crop -i examples/portrait.png -o examples/output/crop/portrait_face.png -w 400 -h 400 -x 300 -y 150 -p local_cpu --overwrite
+$BINARY_IOIMG crop -i examples/portrait.png -o examples/output/crop/portrait_face.png -w 400 -h 400 -x 300 -y 150 -p local_cpu --overwrite
+
+# 4. Chunk & Concat Video
+echo "Testing: chunk & concat (video.mp4)..."
+mkdir -p examples/output/chunk
+# Chunk into 3 equal parts
+$BINARY_IOVID chunk -i examples/video.mp4 -o "examples/output/chunk/part_%03d.mp4" --chunks 3
+# Concat them back
+$BINARY_IOVID concat examples/output/chunk/part_000.mp4 examples/output/chunk/part_001.mp4 examples/output/chunk/part_002.mp4 -o examples/output/chunk/video_concat.mp4
+
+# Verify concat success via ffprobe duration
+echo "Verifying concatted video validity..."
+if [ ! -s examples/output/chunk/video_concat.mp4 ]; then
+    echo "Error: Concat output video is empty or missing"
+    exit 1
+fi
+
+DUR=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 examples/output/chunk/video_concat.mp4)
+if [ -z "$DUR" ]; then
+    echo "Error: Concat output video is invalid (ffprobe failed)"
+    exit 1
+else
+    echo "Success: Concat video is valid! (Duration: $DUR)"
+fi
 
 echo "----------------------------------------------------"
 echo "All tests completed! Results are in: examples/output/"

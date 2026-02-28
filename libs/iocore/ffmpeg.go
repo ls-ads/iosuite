@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -396,24 +397,172 @@ func Speed(ctx context.Context, config *FFmpegConfig, input, output string, mult
 }
 
 func GetVideoDuration(ctx context.Context, input string) (float64, error) {
+	info, err := GetMediaInfo(ctx, input)
+	if err != nil {
+		return 0, err
+	}
+	if len(info.Streams) == 0 {
+		return 0, fmt.Errorf("no streams found in video")
+	}
+	// Try finding the duration on the container (format block) or the first video stream
+	durationStr := info.Format.Duration
+	if durationStr == "" {
+		for _, s := range info.Streams {
+			if s.Duration != "" {
+				durationStr = s.Duration
+				break
+			}
+		}
+	}
+	if durationStr == "" {
+		return 0, fmt.Errorf("could not determine video duration")
+	}
+
+	v, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse duration %q: %v", durationStr, err)
+	}
+	return v, nil
+}
+
+// ProbeOutput maps the JSON output of ffprobe.
+type ProbeOutput struct {
+	Streams []Stream `json:"streams"`
+	Format  Format   `json:"format"`
+}
+
+type Format struct {
+	Duration string `json:"duration"`
+}
+
+// Stream represents an individual media stream inside a file.
+type Stream struct {
+	Index     int    `json:"index"`
+	CodecName string `json:"codec_name"`
+	CodecType string `json:"codec_type"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Duration  string `json:"duration"`
+}
+
+// GetMediaInfo executes ffprobe on the input file and returns parsed JSON metadata.
+func GetMediaInfo(ctx context.Context, input string) (*ProbeOutput, error) {
 	var out bytes.Buffer
 	args := []string{
 		"-v", "error",
-		"-show_entries", "format=duration",
-		"-of", "default=noprint_wrappers=1:nokey=1",
+		"-show_streams",
+		"-show_format",
+		"-print_format", "json",
 		input,
 	}
+
 	err := RunBinary(ctx, "ffprobe", args, nil, &out, os.Stderr)
 	if err != nil {
-		return 0, fmt.Errorf("ffprobe failed: %v", err)
+		return nil, fmt.Errorf("ffprobe failed: %v", err)
 	}
 
-	str := strings.TrimSpace(out.String())
-	v, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse duration %q: %v", str, err)
+	var parsed ProbeOutput
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse ffprobe json: %v", err)
 	}
-	return v, nil
+
+	return &parsed, nil
+}
+
+func Concat(ctx context.Context, config *FFmpegConfig, inputs []string, output string) error {
+	if len(inputs) < 2 {
+		return fmt.Errorf("concat requires at least 2 input files")
+	}
+
+	// 1. Extract and verify metadata of the first file
+	baseInfo, err := GetMediaInfo(ctx, inputs[0])
+	if err != nil {
+		return fmt.Errorf("failed to probe first file '%s': %v", inputs[0], err)
+	}
+
+	var baseVCodec, baseACodec string
+	var baseWidth, baseHeight int
+
+	for _, s := range baseInfo.Streams {
+		if s.CodecType == "video" {
+			baseVCodec = s.CodecName
+			baseWidth = s.Width
+			baseHeight = s.Height
+		} else if s.CodecType == "audio" {
+			baseACodec = s.CodecName
+		}
+	}
+
+	if baseVCodec == "" {
+		return fmt.Errorf("could not find a video stream in the first file '%s'", inputs[0])
+	}
+
+	// 2. Iterate through remaining files and strictly guarantee metadata matches
+	for i := 1; i < len(inputs); i++ {
+		file := inputs[i]
+		info, err := GetMediaInfo(ctx, file)
+		if err != nil {
+			return fmt.Errorf("failed to probe file '%s': %v", file, err)
+		}
+
+		var vCodec, aCodec string
+		var height, width int
+
+		for _, s := range info.Streams {
+			if s.CodecType == "video" {
+				vCodec = s.CodecName
+				width = s.Width
+				height = s.Height
+			} else if s.CodecType == "audio" {
+				aCodec = s.CodecName
+			}
+		}
+
+		if vCodec != baseVCodec {
+			return fmt.Errorf("incompatible video codecs: '%s' has %s, but '%s' has %s. Please 'iovid transcode' them to the same codec first", inputs[0], baseVCodec, file, vCodec)
+		}
+		if width != baseWidth || height != baseHeight {
+			return fmt.Errorf("incompatible resolutions: '%s' is %dx%d, but '%s' is %dx%d. Please 'iovid scale' them to match first", inputs[0], baseWidth, baseHeight, file, width, height)
+		}
+		if aCodec != baseACodec {
+			return fmt.Errorf("incompatible audio codecs: '%s' has %s, but '%s' has %s. Please 'iovid transcode' them to the same codec first", inputs[0], baseACodec, file, aCodec)
+		}
+	}
+
+	// 3. Create the intermediate concat list file
+	tmpFile, err := os.CreateTemp("", "ffmpeg_concat_*.txt")
+	if err != nil {
+		return fmt.Errorf("failed to create temp concat file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	var b bytes.Buffer
+	for _, file := range inputs {
+		// Needs to handle potentially absolute or relative paths with FFmpeg quotes
+		absFile, err := filepath.Abs(file)
+		if err != nil {
+			absFile = file
+		}
+		// Write format: file '/path/to/file.mp4'
+		b.WriteString(fmt.Sprintf("file '%s'\n", strings.ReplaceAll(absFile, "'", "'\\''")))
+	}
+
+	if _, err := tmpFile.Write(b.Bytes()); err != nil {
+		return fmt.Errorf("failed to write to temp concat file: %v", err)
+	}
+	tmpFile.Close()
+
+	// 4. Execute the lossless concatenation
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+		"-f", "concat",
+		"-safe", "0",
+		"-i", tmpFile.Name(),
+		"-c", "copy",
+		"-y", output,
+	}
+
+	return RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr)
 }
 
 func Chunk(ctx context.Context, input, outputPattern string, chunks int, length float64) error {
@@ -439,7 +588,7 @@ func Chunk(ctx context.Context, input, outputPattern string, chunks int, length 
 		"-f", "segment",
 		"-segment_time", fmt.Sprintf("%f", segmentTime),
 		"-reset_timestamps", "1",
-		outputPattern,
+		"-y", outputPattern,
 	}
 
 	return RunBinary(ctx, "ffmpeg-serve", args, nil, os.Stdout, os.Stderr)

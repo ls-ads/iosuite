@@ -329,5 +329,25 @@ func init() {
 	transcodeCmd.Flags().StringVar(&vbitrate, "vbitrate", "", "video bitrate (e.g. 5M, 1000k)")
 	transcodeCmd.Flags().StringVar(&abitrate, "abitrate", "", "audio bitrate (e.g. 128k, 192k)")
 	transcodeCmd.Flags().StringVar(&crf, "crf", "", "constant rate factor (e.g. 23, 28, 35)")
-	rootCmd.AddCommand(transcodeCmd)
+	// Concat
+	concatCmd := &cobra.Command{
+		Use:   "concat [input1] [input2]...",
+		Short: "Seamlessly combine multiple video clips losslessly",
+		Args:  cobra.MinimumNArgs(2), // Require at least 2 file arguments
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolveDefaults()
+			if output == "" {
+				return fmt.Errorf("must specify an output file using -o or --output")
+			}
+			for _, f := range args {
+				if !iocore.IsVideo(f) {
+					return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", f)
+				}
+			}
+			ctx := context.Background()
+			cfg := &iocore.FFmpegConfig{Provider: iocore.UpscaleProvider(provider), APIKey: apiKey, Model: model}
+			return iocore.Concat(ctx, cfg, args, output)
+		},
+	}
+	rootCmd.AddCommand(concatCmd)
 }
