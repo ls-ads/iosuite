@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -35,7 +36,7 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
-func resolveDefaults() {
+func resolveDefaults() error {
 	if provider == "" {
 		provider = "local_gpu"
 	}
@@ -49,6 +50,13 @@ func resolveDefaults() {
 		dir := filepath.Dir(input)
 		output = filepath.Join(dir, fmt.Sprintf("%s_out%s", base, ext))
 	}
+
+	if output != "" && !overwrite {
+		if _, err := os.Stat(output); err == nil {
+			return fmt.Errorf("output file '%s' already exists. Use --overwrite to bypass", output)
+		}
+	}
+	return nil
 }
 
 func init() {

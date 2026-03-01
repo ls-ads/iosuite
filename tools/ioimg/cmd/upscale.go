@@ -59,7 +59,9 @@ var upscaleCmd = &cobra.Command{
 			return fmt.Errorf("input is required")
 		}
 
-		resolveDefaults()
+		if err := resolveDefaults(); err != nil {
+			return err
+		}
 
 		// Validate --format if explicitly set
 		if outputFormat != "" && outputFormat != "jpg" && outputFormat != "png" {

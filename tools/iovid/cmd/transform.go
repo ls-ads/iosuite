@@ -327,7 +327,9 @@ func init() {
 		Use:   "transcode",
 		Short: "Transcode video and audio streams",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolveDefaults()
+			if err := resolveDefaults(); err != nil {
+				return err
+			}
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
