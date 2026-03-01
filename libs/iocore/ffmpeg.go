@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -113,6 +114,41 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 	// For now, we assume the output file name in S3 matches the expected local base name.
 
 	return nil
+}
+
+// SupportsAV1Encoding returns true if the specified NVIDIA GPU architecture supports hardware AV1 encoding.
+func SupportsAV1Encoding(gpuName string) bool {
+	name := strings.ToUpper(gpuName)
+	// AV1 hardware encoding (NVENC) is supported on:
+	// - Ada Lovelace architecture (RTX 40-series, L4, L40, L40S, RTX 4000/5000/6000 Ada)
+	// - Blackwell architecture (RTX 50-series)
+	// It is NOT supported on Ampere, Turing, Volta, or older architectures.
+	if strings.Contains(name, "ADA") ||
+		strings.Contains(name, "L40") ||
+		strings.Contains(name, "L4") ||
+		strings.Contains(name, "4090") ||
+		strings.Contains(name, "4080") ||
+		strings.Contains(name, "4070") ||
+		strings.Contains(name, "4060") ||
+		strings.Contains(name, "4050") ||
+		strings.Contains(name, "5090") ||
+		strings.Contains(name, "5080") ||
+		strings.Contains(name, "5070") {
+		return true
+	}
+	return false
+}
+
+// GetLocalGPUName attempts to get the name of the local NVIDIA GPU using nvidia-smi.
+func GetLocalGPUName() string {
+	out, err := exec.Command("nvidia-smi", "--query-gpu=name", "--format=csv,noheader").Output()
+	if err == nil {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		if len(lines) > 0 {
+			return strings.TrimSpace(lines[0])
+		}
+	}
+	return ""
 }
 
 func runLocalFFmpeg(ctx context.Context, provider UpscaleProvider, input string, output string, filter string, extraArgs []string) error {
@@ -369,6 +405,31 @@ func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec,
 	if vcodec != "" {
 		resolvedVCodec := vcodec
 		if isGPU {
+			// Pre-flight check for AV1 hardware encoding
+			if vcodec == "av1" {
+				if p == ProviderRunPod {
+					endpointName := GetRunPodEndpointName(config.Model)
+					key := config.APIKey
+					if key == "" {
+						key = os.Getenv("RUNPOD_API_KEY")
+					}
+					endpoints, err := GetRunPodEndpoints(ctx, key, endpointName)
+					if err == nil && len(endpoints) > 0 {
+						gpuTypes := endpoints[0].GPUTypeIDs
+						for _, gpu := range gpuTypes {
+							if !SupportsAV1Encoding(gpu) {
+								return fmt.Errorf("RunPod endpoint '%s' uses GPU '%s' which does not support AV1 hardware encoding (requires Ada Lovelace or newer)", endpointName, gpu)
+							}
+						}
+					}
+				} else if p == ProviderLocalGPU && runtime.GOOS != "darwin" {
+					gpuName := GetLocalGPUName()
+					if gpuName != "" && !SupportsAV1Encoding(gpuName) {
+						return fmt.Errorf("local GPU '%s' does not support AV1 hardware encoding (requires Ada Lovelace or newer)", gpuName)
+					}
+				}
+			}
+
 			switch vcodec {
 			case "h264":
 				if runtime.GOOS == "darwin" && p != ProviderRunPod {
