@@ -661,7 +661,7 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 
 	status("processing", "Submitting serverless job...")
 
-	input := buildVolumeJobInput(cfg.EndpointID, cfg.TemplateID, inputFileName, outputFileName, cfg.FFmpegArgs)
+	input := buildVolumeJobInput(cfg.EndpointID, cfg.TemplateID, inputFileName, outputFileName, cfg.FFmpegArgs, cfg.OutputExt)
 
 	job, err := RunRunPodJobSync(ctx, key, endpointID, input, func(phase, message string, elapsed time.Duration) {
 		status(phase, message)
@@ -680,7 +680,10 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		remoteOut = outPath
 	}
 
-	if err := s3Client.DownloadFile(ctx, remoteOut, downloadPath); err != nil {
+	// S3 keys must not have the mount prefix
+	s3Key := strings.TrimPrefix(remoteOut, runpodVolumeMount+"/")
+
+	if err := s3Client.DownloadFile(ctx, s3Key, downloadPath); err != nil {
 		return fmt.Errorf("download failed: %v", err)
 	}
 
@@ -695,7 +698,7 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 
 const runpodVolumeMount = "/runpod-volume"
 
-func buildVolumeJobInput(endpointID, templateID, inputFileName, outputFileName, ffmpegArgs string) map[string]interface{} {
+func buildVolumeJobInput(endpointID, templateID, inputFileName, outputFileName, ffmpegArgs, outputExt string) map[string]interface{} {
 	input := map[string]interface{}{}
 
 	// Remote paths within the worker must be prefixed with /runpod-volume
@@ -706,6 +709,9 @@ func buildVolumeJobInput(endpointID, templateID, inputFileName, outputFileName, 
 	if strings.Contains(endpointID, "img") || templateID == "047z8w5i69" {
 		input["image_path"] = remoteInput
 		input["output_path"] = remoteOutput
+		if outputExt != "" {
+			input["output_format"] = outputExt
+		}
 	} else {
 		input["input_path"] = remoteInput
 		input["output_path"] = remoteOutput
