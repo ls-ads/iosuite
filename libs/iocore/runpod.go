@@ -661,21 +661,7 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 
 	status("processing", "Submitting serverless job...")
 
-	// Construct input payload based on the handler's expectations
-	input := map[string]interface{}{}
-
-	// Check if this is for ffmpeg or real-esrgan (image vs media)
-	// We'll use broad keys that the updated handlers support
-	if strings.Contains(cfg.EndpointID, "img") || cfg.TemplateID == "047z8w5i69" {
-		input["image_path"] = inputFileName
-		input["output_path"] = outputFileName
-	} else {
-		input["input_path"] = inputFileName
-		input["output_path"] = outputFileName
-		if cfg.FFmpegArgs != "" {
-			input["ffmpeg_args"] = cfg.FFmpegArgs
-		}
-	}
+	input := buildVolumeJobInput(cfg.EndpointID, cfg.TemplateID, inputFileName, outputFileName, cfg.FFmpegArgs)
 
 	job, err := RunRunPodJobSync(ctx, key, endpointID, input, func(phase, message string, elapsed time.Duration) {
 		status(phase, message)
@@ -705,4 +691,27 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	}
 
 	return nil
+}
+
+const runpodVolumeMount = "/runpod-volume"
+
+func buildVolumeJobInput(endpointID, templateID, inputFileName, outputFileName, ffmpegArgs string) map[string]interface{} {
+	input := map[string]interface{}{}
+
+	// Remote paths within the worker must be prefixed with /runpod-volume
+	remoteInput := filepath.Join(runpodVolumeMount, inputFileName)
+	remoteOutput := filepath.Join(runpodVolumeMount, outputFileName)
+
+	// Check if this is for ffmpeg or real-esrgan (image vs media)
+	if strings.Contains(endpointID, "img") || templateID == "047z8w5i69" {
+		input["image_path"] = remoteInput
+		input["output_path"] = remoteOutput
+	} else {
+		input["input_path"] = remoteInput
+		input["output_path"] = remoteOutput
+		if ffmpegArgs != "" {
+			input["ffmpeg_args"] = ffmpegArgs
+		}
+	}
+	return input
 }
