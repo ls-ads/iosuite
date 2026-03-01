@@ -70,6 +70,7 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 		APIKey:         config.APIKey,
 		TemplateID:     templateID,
 		GPUID:          gpuIDs,
+		UseVolume:      config.UseVolume,
 		InputLocalPath: input,
 		OutputLocalDir: filepath.Dir(output),
 		KeepFailed:     config.KeepFailed,

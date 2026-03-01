@@ -248,6 +248,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		volWorkflowCfg := VolumeWorkflowConfig{
 			APIKey:         key,
 			EndpointID:     u.endpointID,
+			UseVolume:      u.config.UseVolume,
 			InputLocalPath: tmpIn.Name(),
 			OutputLocalDir: tmpOutDir,
 			OutputExt:      u.config.OutputFormat,
