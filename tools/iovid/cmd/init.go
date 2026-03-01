@@ -62,9 +62,13 @@ var startCmd = &cobra.Command{
 				GPUIDs:     gpuIDs,
 			}
 		} else if model == "real-esrgan" {
+			esrganGpuIDs := gpuIDs
+			if gpuType == "" {
+				esrganGpuIDs = []string{"NVIDIA GeForce RTX 4090"}
+			}
 			modelCfg = iocore.ModelConfig{
 				TemplateID: "047z8w5i69",
-				GPUIDs:     gpuIDs,
+				GPUIDs:     esrganGpuIDs,
 			}
 		} else {
 			return fmt.Errorf("unsupported model for RunPod infrastructure: %s (supported: ffmpeg, real-esrgan)", model)
