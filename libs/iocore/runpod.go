@@ -60,6 +60,20 @@ type RunPodEndpointConfig struct {
 	ComputeType      string   `json:"computeType,omitempty"`
 }
 
+// EndpointUpdateInput holds configuration for updating an existing RunPod Serverless Endpoint.
+type EndpointUpdateInput struct {
+	GPUTypeIDs       []string `json:"gpuTypeIds,omitempty"`
+	GPUCount         int      `json:"gpuCount,omitempty"`
+	DataCenterIDs    []string `json:"dataCenterIds,omitempty"`
+	WorkersMin       int      `json:"workersMin"`
+	WorkersMax       int      `json:"workersMax"`
+	IdleTimeout      int      `json:"idleTimeout"`
+	Flashboot        bool     `json:"flashboot"`
+	NetworkVolumeID  string   `json:"networkVolumeId,omitempty"`
+	NetworkVolumeIDs []string `json:"networkVolumeIds,omitempty"`
+	ComputeType      string   `json:"computeType,omitempty"`
+}
+
 // EnsureRunPodEndpoint checks if a RunPod endpoint with the given name prefix exists.
 // If it does, it returns the endpoint ID. Otherwise, it creates a new endpoint
 // using the provided config and returns its ID.
@@ -129,6 +143,37 @@ func EnsureRunPodEndpoint(ctx context.Context, key string, config RunPodEndpoint
 
 	Debug("Created new RunPod endpoint", "id", createData.ID, "name", createData.Name)
 	return createData.ID, nil
+}
+
+// UpdateRunPodEndpoint updates an existing RunPod endpoint
+func UpdateRunPodEndpoint(ctx context.Context, key, endpointID string, input EndpointUpdateInput) error {
+	updateURL := fmt.Sprintf("https://rest.runpod.io/v1/endpoints/%s", endpointID)
+	jsonData, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("failed to marshal update endpoint request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", updateURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to create request for RunPod endpoint update: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to perform RunPod endpoint update request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("RunPod API returned status %d when updating endpoint: %s", resp.StatusCode, string(body))
+	}
+
+	Debug("Updated RunPod endpoint", "id", endpointID)
+	return nil
 }
 
 // RunPodJobResponse represents the response from a RunPod serverless job.
@@ -322,22 +367,63 @@ func ProvisionRunPodModel(ctx context.Context, key string, model string, modelCf
 	if err != nil {
 		return "", fmt.Errorf("failed to check for existing endpoints: %v", err)
 	}
+
+	var networkVolumeIDs []string
+	if modelCfg.NetworkVolumeID != "" {
+		networkVolumeIDs = []string{modelCfg.NetworkVolumeID}
+	}
+
+	config := RunPodEndpointConfig{
+		Name:             endpointName,
+		TemplateID:       modelCfg.TemplateID,
+		GPUTypeIDs:       modelCfg.GPUIDs,
+		DataCenterIDs:    dataCenterIDs,
+		WorkersMin:       workersMin,
+		WorkersMax:       1,
+		IdleTimeout:      5,
+		Flashboot:        true,
+		NetworkVolumeID:  modelCfg.NetworkVolumeID,
+		NetworkVolumeIDs: networkVolumeIDs,
+	}
+
 	if len(existing) > 0 {
-		return existing[0].ID, nil
+		e := existing[0]
+
+		hasVolume := false
+		if e.NetworkVolumeID == modelCfg.NetworkVolumeID {
+			hasVolume = true
+		}
+		for _, vid := range e.NetworkVolumeIDs {
+			if vid == modelCfg.NetworkVolumeID {
+				hasVolume = true
+				break
+			}
+		}
+
+		if modelCfg.NetworkVolumeID != "" && !hasVolume {
+			Debug("Endpoint exists but missing volume, updating endpoint", "id", e.ID, "volumeID", modelCfg.NetworkVolumeID)
+
+			updateInput := EndpointUpdateInput{
+				GPUTypeIDs:       config.GPUTypeIDs,
+				DataCenterIDs:    config.DataCenterIDs,
+				WorkersMin:       config.WorkersMin,
+				WorkersMax:       config.WorkersMax,
+				IdleTimeout:      config.IdleTimeout,
+				Flashboot:        config.Flashboot,
+				NetworkVolumeID:  config.NetworkVolumeID,  // Keep for legacy
+				NetworkVolumeIDs: config.NetworkVolumeIDs, // Override array to fix mount precedence
+			}
+
+			err := UpdateRunPodEndpoint(ctx, key, e.ID, updateInput)
+			if err != nil {
+				return "", fmt.Errorf("failed to update existing endpoint with volume: %v", err)
+			}
+		}
+		return e.ID, nil
 	}
 
 	// 2. Provision new endpoint
-	endpointID, err := EnsureRunPodEndpoint(ctx, key, RunPodEndpointConfig{
-		Name:            endpointName,
-		TemplateID:      modelCfg.TemplateID,
-		GPUTypeIDs:      modelCfg.GPUIDs,
-		DataCenterIDs:   dataCenterIDs,
-		WorkersMin:      workersMin,
-		WorkersMax:      1,
-		IdleTimeout:     5,
-		Flashboot:       true,
-		NetworkVolumeID: modelCfg.NetworkVolumeID,
-	})
+	endpointID, err := EnsureRunPodEndpoint(ctx, key, config)
 	if err != nil {
 		return "", fmt.Errorf("failed to provision RunPod endpoint: %v", err)
 	}
@@ -615,10 +701,26 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	useVolume := cfg.UseVolume || volumeID != "" || cfg.VolumeSizeGB >= 10
 	createdVolume := false
 
+	// Auto-resolve endpoint ID if missing but model is provided
+	if endpointID == "" && cfg.ModelName != "" {
+		namePrefix := GetRunPodEndpointName(cfg.ModelName)
+		endpoints, err := GetRunPodEndpoints(ctx, key, namePrefix)
+		if err == nil && len(endpoints) > 0 {
+			endpointID = endpoints[0].ID
+			status("infrastructure", fmt.Sprintf("Auto-discovered endpoint: %s", endpointID))
+		}
+	}
+
 	// If no volume ID provided but volume workflow requested, try to find it from the endpoint configuration
 	if volumeID == "" && endpointID != "" && useVolume {
 		status("infrastructure", "Discovering attached network volume...")
-		endpoints, err := GetRunPodEndpoints(ctx, key, "")
+
+		namePrefix := ""
+		if cfg.ModelName != "" {
+			namePrefix = GetRunPodEndpointName(cfg.ModelName)
+		}
+
+		endpoints, err := GetRunPodEndpoints(ctx, key, namePrefix)
 		if err == nil {
 			for _, e := range endpoints {
 				if e.ID == endpointID {
@@ -645,9 +747,6 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		volumeID = vid
 		createdVolume = true
 		status("infrastructure", fmt.Sprintf("Created volume: %s", volumeID))
-
-		// Settle time for RunPod volume to be ready for S3
-		time.Sleep(5 * time.Second)
 	}
 
 	// 3. Resolve Region from Volume (critical for S3 307 redirects)
