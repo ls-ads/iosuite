@@ -74,6 +74,7 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 		InputLocalPath: input,
 		OutputLocalDir: filepath.Dir(output),
 		KeepFailed:     config.KeepFailed,
+		ModelName:      config.Model,
 	}
 
 	if len(config.DataCenterIDs) > 0 {

@@ -253,6 +253,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 			OutputLocalDir: tmpOutDir,
 			OutputExt:      u.config.OutputFormat,
 			KeepFailed:     u.config.KeepFailed,
+			ModelName:      u.config.Model,
 		}
 
 		if len(u.config.DataCenterIDs) > 0 {
