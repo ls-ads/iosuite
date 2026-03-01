@@ -103,7 +103,7 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 	}
 	volWorkflowCfg.OutputExt = strings.TrimPrefix(filepath.Ext(output), ".")
 
-	err := RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, statusFunc)
+	_, err := RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, statusFunc)
 	if err != nil {
 		return err
 	}

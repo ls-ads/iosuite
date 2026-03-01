@@ -73,3 +73,13 @@ func (s *S3Client) DownloadFile(ctx context.Context, s3Key, localPath string) er
 		"--region", s.region,
 	)
 }
+
+// DeleteFile deletes a file from S3 using aws s3 rm.
+func (s *S3Client) DeleteFile(ctx context.Context, s3Key string) error {
+	s3URI := fmt.Sprintf("s3://%s/%s", s.bucket, s3Key)
+	return s.runAWSCommand(ctx,
+		"s3", "rm", s3URI,
+		"--endpoint-url", s.endpoint,
+		"--region", s.region,
+	)
+}

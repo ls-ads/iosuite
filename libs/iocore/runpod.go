@@ -603,7 +603,7 @@ type VolumeWorkflowConfig struct {
 }
 
 // RunPodServerlessVolumeWorkflow handles the full lifecycle: volume -> upload -> serverless job -> download -> cleanup.
-func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfig, status func(phase, message string)) error {
+func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfig, status func(phase, message string)) (*RunPodJobResponse, error) {
 	key := cfg.APIKey
 	if key == "" {
 		key = os.Getenv("RUNPOD_API_KEY")
@@ -613,6 +613,7 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	volumeID := cfg.VolumeID
 	endpointID := cfg.EndpointID
 	useVolume := cfg.UseVolume || volumeID != "" || cfg.VolumeSizeGB >= 10
+	createdVolume := false
 
 	// If no volume ID provided but volume workflow requested, try to find it from the endpoint configuration
 	if volumeID == "" && endpointID != "" && useVolume {
@@ -639,9 +640,10 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		status("infrastructure", "Creating network volume...")
 		vid, err := CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%d", time.Now().Unix()), cfg.VolumeSizeGB, cfg.Region)
 		if err != nil {
-			return fmt.Errorf("failed to create volume: %v", err)
+			return nil, fmt.Errorf("failed to create volume: %v", err)
 		}
 		volumeID = vid
+		createdVolume = true
 		status("infrastructure", fmt.Sprintf("Created volume: %s", volumeID))
 
 		// Settle time for RunPod volume to be ready for S3
@@ -669,19 +671,19 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	s3Access := strings.Trim(os.Getenv("AWS_ACCESS_KEY_ID"), " \t\n\r\x00")
 	s3Secret := strings.Trim(os.Getenv("AWS_SECRET_ACCESS_KEY"), " \t\n\r\x00")
 	if s3Access == "" || s3Secret == "" {
-		return fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are strictly required for Network Volume access")
+		return nil, fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are strictly required for Network Volume access")
 	}
 
 	s3Client, err := NewS3Client(ctx, region, s3Access, s3Secret, volumeID)
 	if err != nil {
-		return fmt.Errorf("failed to setup S3 client: %v", err)
+		return nil, fmt.Errorf("failed to setup S3 client: %v", err)
 	}
 
 	// 3. Upload Input
 	inputFileName := filepath.Base(cfg.InputLocalPath)
 	status("upload", fmt.Sprintf("Uploading %s to volume...", inputFileName))
 	if err := s3Client.UploadFile(ctx, cfg.InputLocalPath, inputFileName); err != nil {
-		return fmt.Errorf("upload failed: %v", err)
+		return nil, fmt.Errorf("upload failed: %v", err)
 	}
 
 	// 4. Ensure Endpoint exists (if we have provisioning info)
@@ -694,13 +696,13 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		}
 		eid, err := ProvisionRunPodModel(ctx, key, "workflow", modelCfg, cfg.DataCenterIDs, 0)
 		if err != nil {
-			return fmt.Errorf("failed to provision endpoint: %v", err)
+			return nil, fmt.Errorf("failed to provision endpoint: %v", err)
 		}
 		endpointID = eid
 	}
 
 	if endpointID == "" {
-		return fmt.Errorf("endpoint ID is required for serverless workflow")
+		return nil, fmt.Errorf("endpoint ID is required for serverless workflow")
 	}
 
 	// 5. Submit Serverless Job
@@ -718,7 +720,7 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		status(phase, message)
 	})
 	if err != nil {
-		return fmt.Errorf("serverless job failed: %v", err)
+		return nil, fmt.Errorf("serverless job failed: %v", err)
 	}
 
 	// 6. Download Output
@@ -735,16 +737,22 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	s3Key := strings.TrimPrefix(remoteOut, runpodVolumeMount+"/")
 
 	if err := s3Client.DownloadFile(ctx, s3Key, downloadPath); err != nil {
-		return fmt.Errorf("download failed: %v", err)
+		return nil, fmt.Errorf("download failed: %v", err)
 	}
 
 	// 7. Cleanup (Optional)
 	if !cfg.KeepFailed {
-		status("cleanup", "Cleaning up network volume...")
-		_ = DeleteNetworkVolume(ctx, key, volumeID)
+		if createdVolume {
+			status("cleanup", "Cleaning up network volume...")
+			_ = DeleteNetworkVolume(ctx, key, volumeID)
+		} else {
+			status("cleanup", "Cleaning up temporary files...")
+			_ = s3Client.DeleteFile(ctx, inputFileName)
+			_ = s3Client.DeleteFile(ctx, s3Key)
+		}
 	}
 
-	return nil
+	return job, nil
 }
 
 const runpodVolumeMount = "/runpod-volume"

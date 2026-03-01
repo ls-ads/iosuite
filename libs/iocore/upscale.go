@@ -266,13 +266,13 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 		volWorkflowCfg.VolumeID = ""
 
 		start := time.Now()
-		err = RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, func(phase, message string) {
+		job, err := RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, func(phase, message string) {
 			u.emitStatus(phase, message, time.Since(start))
 		})
 		if err != nil {
 			return 0, err
 		}
-		billableTime := time.Since(start)
+		billableTime := time.Duration(job.ExecutionTime) * time.Millisecond
 
 		// Find the output file and write to w
 		files, _ := os.ReadDir(tmpOutDir)
