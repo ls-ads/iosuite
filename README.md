@@ -31,12 +31,13 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
 3. **Upscale Media**: Process your images or videos with lightning-fast AI.
    ```bash
    # Upscale using your Network Volume (idempotent & efficient for large files)
+   # iosuite will automatically discover the attached volume ID
    ioimg upscale \
      --input photo.jpg \
      --output photo_4x.jpg \
      --model real-esrgan \
      --provider runpod \
-     --volume YOUR_VOLUME_ID
+     --volume
    ```
 
 For a full list of available commands and detailed usage for each tool, see:

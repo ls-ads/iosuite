@@ -10,7 +10,7 @@ var (
 	provider  string
 	apiKey    string
 	model     string
-	volume    string
+	volume    bool
 	overwrite bool
 
 	// Shared RunPod flags
@@ -47,5 +47,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "", "Model name (for upscale/ffmpeg)")
 	rootCmd.PersistentFlags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists")
-	rootCmd.PersistentFlags().StringVar(&volume, "volume", "", "RunPod volume ID or size in GB for the volume workflow")
+	rootCmd.PersistentFlags().BoolVar(&volume, "volume", false, "Use RunPod network volume for processing")
 }

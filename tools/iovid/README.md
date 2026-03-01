@@ -18,7 +18,7 @@
 - `-p`, `--provider`: Execution provider (`local_cpu`, `local_gpu`, `runpod`). (required for start/stop)
 - `-k`, `--api-key`: API key for remote execution.
 - `-m`, `--model`: Execution model. (required for start/stop)
-- `--volume`: RunPod Network Volume ID to use for processing.
+- `--volume`: Boolean indicator to use RunPod Network Volume (auto-discovers ID).
 - `--volume-size`: Size in GB for a new Network Volume to provision during `start`.
 - `--gpu-id`: Requested GPU type for RunPod (e.g. `NVIDIA RTX A4000`).
 - `--keep-failed`: Keep the created volume if the job fails.
@@ -177,11 +177,10 @@ iovid start \
 
 For large videos, `iovid` automatically leverages RunPod Network Volumes to avoid the overhead of base64 encoding.
 
-- **Direct Upload**: The input video is uploaded to `/workspace` on the worker via S3.
-- **Local Processing**: FFmpeg processes the file directly on the volume's high-speed storage.
-- **Direct Download**: The resulting video is downloaded back to your local machine.
+- **Idempotency**: Volumes are managed to ensure consistency across retries.
+- **Auto-Discovery**: `iovid` automatically finds the volume attached to your serverless endpoint when `--volume` is passed.
 
-Specify a volume using `--volume <id>` or have one created during `start` with `--volume-size <GB>`.
+Enable the workflow using the `--volume` flag. Volumes are created during `start` with `--volume-size <GB>`.
 
 Stop running processes or tear down cloud resources. **Provider and model flags are required.**
 

@@ -20,7 +20,7 @@ type FFmpegConfig struct {
 	APIKey         string
 	Model          string // Default "ffmpeg"
 	StatusCallback func(RunPodStatusUpdate)
-	Volume         string   // RunPod volume ID or size in GB
+	UseVolume      bool     // Use RunPod network volume workflow
 	GPUID          string   // Requested GPU type
 	DataCenterIDs  []string // Preferred data centers
 	KeepFailed     bool
@@ -38,7 +38,7 @@ func RunFFmpegAction(ctx context.Context, config *FFmpegConfig, input string, ou
 	}
 
 	if p == ProviderRunPod {
-		if config.Volume != "" {
+		if config.UseVolume {
 			return runRunPodVolumeFFmpeg(ctx, config, input, output, filter, extraArgs)
 		}
 		return runRunPodFFmpeg(ctx, config, input, output, filter, extraArgs)
@@ -48,7 +48,7 @@ func RunFFmpegAction(ctx context.Context, config *FFmpegConfig, input string, ou
 }
 
 func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, output, filter string, extraArgs []string) error {
-	Info("Running FFmpeg on RunPod via Volume Workflow", "input", input, "volume", config.Volume)
+	Info("Running FFmpeg on RunPod via Volume Workflow", "input", input)
 
 	// 1. Resolve Model Config (Template + GPUs)
 	gpuIDs := config.GPUID
@@ -81,12 +81,8 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 		volWorkflowCfg.Region = "EU-RO-1" // Default
 	}
 
-	// Parse Volume ID or Size
-	if size, err := strconv.Atoi(config.Volume); err == nil {
-		volWorkflowCfg.VolumeSizeGB = size
-	} else {
-		volWorkflowCfg.VolumeID = config.Volume
-	}
+	// VolumeID is empty; RunPodServerlessVolumeWorkflow will auto-discover it
+	volWorkflowCfg.VolumeID = ""
 
 	// 3. Execution wrapper
 	statusFunc := func(phase, message string) {

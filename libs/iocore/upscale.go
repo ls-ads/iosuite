@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"time"
 )
 
@@ -40,7 +39,7 @@ type UpscaleConfig struct {
 	Model          string                   // Model name (e.g., "real-esrgan")
 	OutputFormat   string                   // Output format: "jpg" or "png"
 	StatusCallback func(RunPodStatusUpdate) // Optional callback for progress updates
-	Volume         string                   // RunPod volume ID or size in GB
+	UseVolume      bool                     // Use RunPod network volume workflow
 	GPUID          string                   // Requested GPU type
 	DataCenterIDs  []string                 // Preferred data centers
 	KeepFailed     bool
@@ -228,7 +227,7 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	// 1. Check if Volume workflow is requested
-	if u.config.Volume != "" {
+	if u.config.UseVolume {
 		// We need to write the reader to a temp file to use the volume workflow
 		tmpIn, err := os.CreateTemp("", "io-upscale-in-*")
 		if err != nil {
@@ -261,12 +260,8 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 			volWorkflowCfg.Region = "us-east-1" // Default
 		}
 
-		// Parse Volume ID or Size
-		if size, err := strconv.Atoi(u.config.Volume); err == nil {
-			volWorkflowCfg.VolumeSizeGB = size
-		} else {
-			volWorkflowCfg.VolumeID = u.config.Volume
-		}
+		// VolumeID is empty; RunPodServerlessVolumeWorkflow will auto-discover it
+		volWorkflowCfg.VolumeID = ""
 
 		start := time.Now()
 		err = RunPodServerlessVolumeWorkflow(ctx, volWorkflowCfg, func(phase, message string) {

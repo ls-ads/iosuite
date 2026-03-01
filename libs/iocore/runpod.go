@@ -590,6 +590,7 @@ type VolumeWorkflowConfig struct {
 	EndpointID     string
 	VolumeSizeGB   int
 	VolumeID       string // Optional: if provided, uses existing volume
+	UseVolume      bool   // Indicator to use network volume (triggers auto-discovery if VolumeID is empty)
 	InputLocalPath string
 	OutputLocalDir string
 	TemplateID     string   // For provisioning
@@ -610,9 +611,10 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	// 1. Resolve/Auto-discover VolumeID
 	volumeID := cfg.VolumeID
 	endpointID := cfg.EndpointID
+	useVolume := cfg.UseVolume || volumeID != "" || cfg.VolumeSizeGB >= 10
 
-	// If no volume ID provided, try to find it from the endpoint configuration
-	if volumeID == "" && endpointID != "" {
+	// If no volume ID provided but volume workflow requested, try to find it from the endpoint configuration
+	if volumeID == "" && endpointID != "" && useVolume {
 		status("infrastructure", "Discovering attached network volume...")
 		endpoints, err := GetRunPodEndpoints(ctx, key, "")
 		if err == nil {

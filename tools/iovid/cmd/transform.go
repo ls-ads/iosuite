@@ -41,7 +41,7 @@ func makeFFmpegConfig() *iocore.FFmpegConfig {
 		Provider:      iocore.UpscaleProvider(provider),
 		APIKey:        apiKey,
 		Model:         model,
-		Volume:        volume,
+		UseVolume:     volume,
 		GPUID:         gpuType,
 		DataCenterIDs: dataCenterIds,
 		KeepFailed:    keepFailed,

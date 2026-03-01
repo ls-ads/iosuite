@@ -25,7 +25,7 @@ ioimg upscale -i <input> [flags]
 | `--provider` | `-p` | (required for start/stop) | Execution provider (`local_cpu`, `local_gpu`, `runpod`) |
 | `--api-key` | `-k` | | API key for remote providers |
 | `--model` | `-m` | (required for start/stop) | Upscale model (or `ffmpeg`) |
-| `--volume` | | | RunPod Network Volume ID to use for processing |
+| `--volume` | | `false` | Enable RunPod Network Volume workflow (auto-discovers ID) |
 | `--gpu-id` | | `NVIDIA RTX A4000` | Requested GPU type for RunPod |
 | `--keep-failed` | | `false` | Keep the created volume if the job fails |
 | `--json` | | `false` | Output metrics as JSON |
@@ -264,8 +264,9 @@ ioimg upscale \
 
 Manage RunPod network volumes for large media handling. The serverless workflow automatically uses these volumes to avoid base64 overhead for large files.
 
-- **Direct Upload/Download**: Files are uploaded to the volume via S3, processed locally by the worker in `/workspace`, and then downloaded.
-- **Idempotency**: Volumes are named based on the project/task to ensure consistency across retries.
+- **Auto-Discovery**: When `--volume` is passed to a processing command, `iosuite` automatically finds the volume attached to your serverless endpoint.
+- **Direct Upload/Download**: Files are uploaded to the volume via S3, processed locally by the worker in `/runpod-volume`, and then downloaded.
+- **Idempotency**: Volumes are managed to ensure consistency across retries.
 
 ```bash
 # Create a 100GB volume in EU-RO-1
