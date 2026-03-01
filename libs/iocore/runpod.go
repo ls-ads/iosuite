@@ -46,14 +46,18 @@ var RunPodAvailableGPUs = []string{
 
 // RunPodEndpointConfig holds configuration for auto-provisioning a RunPod Serverless Endpoint.
 type RunPodEndpointConfig struct {
-	Name          string   `json:"name"`
-	TemplateID    string   `json:"templateId"`
-	GPUTypeIDs    []string `json:"gpuTypeIds"`
-	DataCenterIDs []string `json:"dataCenterIds,omitempty"`
-	WorkersMin    int      `json:"workersMin"`
-	WorkersMax    int      `json:"workersMax"`
-	IdleTimeout   int      `json:"idleTimeout"`
-	Flashboot     bool     `json:"flashboot"`
+	Name             string   `json:"name"`
+	TemplateID       string   `json:"templateId"`
+	GPUTypeIDs       []string `json:"gpuTypeIds,omitempty"`
+	GPUCount         int      `json:"gpuCount,omitempty"`
+	DataCenterIDs    []string `json:"dataCenterIds,omitempty"`
+	WorkersMin       int      `json:"workersMin"`
+	WorkersMax       int      `json:"workersMax"`
+	IdleTimeout      int      `json:"idleTimeout"`
+	Flashboot        bool     `json:"flashboot"`
+	NetworkVolumeID  string   `json:"networkVolumeId,omitempty"`
+	NetworkVolumeIDs []string `json:"networkVolumeIds,omitempty"`
+	ComputeType      string   `json:"computeType,omitempty"`
 }
 
 // EnsureRunPodEndpoint checks if a RunPod endpoint with the given name prefix exists.
@@ -304,8 +308,9 @@ func GetRunPodEndpointName(model string) string {
 
 // ModelConfig holds the cloud configuration for a specific model.
 type ModelConfig struct {
-	TemplateID string
-	GPUIDs     []string
+	TemplateID      string
+	GPUIDs          []string
+	NetworkVolumeID string
 }
 
 // ProvisionRunPodModel handles the end-to-end provisioning of a RunPod endpoint for a model.
@@ -323,14 +328,15 @@ func ProvisionRunPodModel(ctx context.Context, key string, model string, modelCf
 
 	// 2. Provision new endpoint
 	endpointID, err := EnsureRunPodEndpoint(ctx, key, RunPodEndpointConfig{
-		Name:          endpointName,
-		TemplateID:    modelCfg.TemplateID,
-		GPUTypeIDs:    modelCfg.GPUIDs,
-		DataCenterIDs: dataCenterIDs,
-		WorkersMin:    workersMin,
-		WorkersMax:    1,
-		IdleTimeout:   5,
-		Flashboot:     true,
+		Name:            endpointName,
+		TemplateID:      modelCfg.TemplateID,
+		GPUTypeIDs:      modelCfg.GPUIDs,
+		DataCenterIDs:   dataCenterIDs,
+		WorkersMin:      workersMin,
+		WorkersMax:      1,
+		IdleTimeout:     5,
+		Flashboot:       true,
+		NetworkVolumeID: modelCfg.NetworkVolumeID,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to provision RunPod endpoint: %v", err)
@@ -340,10 +346,12 @@ func ProvisionRunPodModel(ctx context.Context, key string, model string, modelCf
 }
 
 type RunPodEndpoint struct {
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	GPUTypeIDs []string `json:"gpuTypeIds"`
-	WorkersMin int      `json:"workersMin"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	GPUTypeIDs       []string `json:"gpuTypeIds"`
+	WorkersMin       int      `json:"workersMin"`
+	NetworkVolumeID  string   `json:"networkVolumeId"`
+	NetworkVolumeIDs []string `json:"networkVolumeIds"`
 }
 
 // CalculateRunPodEndpointRate calculates the rate per second according to the endpoint's GPU and scaling profile.
@@ -599,9 +607,32 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		key = os.Getenv("RUNPOD_API_KEY")
 	}
 
-	// 1. Create/Ensure Volume
+	// 1. Resolve/Auto-discover VolumeID
 	volumeID := cfg.VolumeID
-	if volumeID == "" {
+	endpointID := cfg.EndpointID
+
+	// If no volume ID provided, try to find it from the endpoint configuration
+	if volumeID == "" && endpointID != "" {
+		status("infrastructure", "Discovering attached network volume...")
+		endpoints, err := GetRunPodEndpoints(ctx, key, "")
+		if err == nil {
+			for _, e := range endpoints {
+				if e.ID == endpointID {
+					if e.NetworkVolumeID != "" {
+						volumeID = e.NetworkVolumeID
+						status("infrastructure", fmt.Sprintf("Auto-discovered volume: %s", volumeID))
+					} else if len(e.NetworkVolumeIDs) > 0 {
+						volumeID = e.NetworkVolumeIDs[0]
+						status("infrastructure", fmt.Sprintf("Auto-discovered volume: %s", volumeID))
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 2. Create Volume if still missing and a size was requested
+	if volumeID == "" && cfg.VolumeSizeGB >= 10 {
 		status("infrastructure", "Creating network volume...")
 		vid, err := CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%d", time.Now().Unix()), cfg.VolumeSizeGB, cfg.Region)
 		if err != nil {
@@ -634,12 +665,12 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	}
 
 	// 4. Ensure Endpoint exists (if we have provisioning info)
-	endpointID := cfg.EndpointID
 	if endpointID == "" && cfg.TemplateID != "" {
 		status("infrastructure", "Provisioning serverless endpoint...")
 		modelCfg := ModelConfig{
-			TemplateID: cfg.TemplateID,
-			GPUIDs:     []string{cfg.GPUID},
+			TemplateID:      cfg.TemplateID,
+			GPUIDs:          []string{cfg.GPUID},
+			NetworkVolumeID: volumeID,
 		}
 		eid, err := ProvisionRunPodModel(ctx, key, "workflow", modelCfg, cfg.DataCenterIDs, 0)
 		if err != nil {
