@@ -220,8 +220,8 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 	}
 
 	switch u.config.Model {
-	case "real-esrgan", "":
-		// Only x4plus is supported currently by the underlying container
+	case "real-esrgan", "", "ffmpeg":
+		// Supported models
 	default:
 		return 0, fmt.Errorf("model not supported: %s", u.config.Model)
 	}
@@ -254,6 +254,9 @@ func (u *runpodUpscaler) Upscale(ctx context.Context, r io.Reader, w io.Writer) 
 			OutputExt:      u.config.OutputFormat,
 			KeepFailed:     u.config.KeepFailed,
 			ModelName:      u.config.Model,
+		}
+		if u.config.Model == "ffmpeg" {
+			volWorkflowCfg.FFmpegArgs = "-vf,scale=iw*4:ih*4:flags=lanczos"
 		}
 
 		if len(u.config.DataCenterIDs) > 0 {
