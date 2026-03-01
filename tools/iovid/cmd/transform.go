@@ -334,7 +334,8 @@ func init() {
 			if output == "" {
 				ext := filepath.Ext(input)
 				base := strings.TrimSuffix(filepath.Base(input), ext)
-				output = fmt.Sprintf("%s_transcode%s", base, ext)
+				dir := filepath.Dir(input)
+				output = filepath.Join(dir, fmt.Sprintf("%s_out%s", base, ext))
 			}
 			ctx := context.Background()
 			cfg := makeFFmpegConfig()

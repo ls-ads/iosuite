@@ -66,7 +66,6 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 		return fmt.Errorf("unsupported model for Volume workflow: %s", config.Model)
 	}
 
-	// 2. Prepare Workflow Config
 	volWorkflowCfg := VolumeWorkflowConfig{
 		APIKey:         config.APIKey,
 		TemplateID:     templateID,
@@ -74,6 +73,7 @@ func runRunPodVolumeFFmpeg(ctx context.Context, config *FFmpegConfig, input, out
 		UseVolume:      config.UseVolume,
 		InputLocalPath: input,
 		OutputLocalDir: filepath.Dir(output),
+		OutputFileName: filepath.Base(output),
 		KeepFailed:     config.KeepFailed,
 		ModelName:      config.Model,
 	}

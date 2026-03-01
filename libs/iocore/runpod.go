@@ -679,6 +679,7 @@ type VolumeWorkflowConfig struct {
 	UseVolume      bool   // Indicator to use network volume (triggers auto-discovery if VolumeID is empty)
 	InputLocalPath string
 	OutputLocalDir string
+	OutputFileName string   // Desired basename of the final output (e.g. "video_out.mp4")
 	TemplateID     string   // For provisioning
 	GPUID          string   // For provisioning
 	ModelName      string   // Represents the exact model being run
@@ -805,10 +806,15 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 	}
 
 	// 5. Submit Serverless Job
-	outputFileName := "out_" + inputFileName
-	if cfg.OutputExt != "" {
-		ext := filepath.Ext(outputFileName)
-		outputFileName = strings.TrimSuffix(outputFileName, ext) + "." + cfg.OutputExt
+	var outputFileName string
+	if cfg.OutputFileName != "" {
+		outputFileName = cfg.OutputFileName
+	} else {
+		outputFileName = "out_" + inputFileName
+		if cfg.OutputExt != "" {
+			ext := filepath.Ext(outputFileName)
+			outputFileName = strings.TrimSuffix(outputFileName, ext) + "." + cfg.OutputExt
+		}
 	}
 
 	status("processing", "Submitting serverless job...")
