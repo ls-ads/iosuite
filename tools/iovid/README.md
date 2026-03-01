@@ -183,26 +183,44 @@ For large videos, `iovid` automatically leverages RunPod Network Volumes to avoi
 
 Enable the workflow using the `--volume` flag. Volumes are created during `start` with `--volume-size <GB>`.
 
+### `iovid runpod volume`
+
+Manage RunPod network volumes independently of endpoints.
+
+```bash
+# Create a 100GB volume
+iovid runpod volume create --name my-vol --size 100 --data-center EU-RO-1
+
+# List all volumes
+iovid runpod volume list
+
+# Delete a volume by ID
+iovid runpod volume delete --id <volume-id>
+# Or as a positional argument
+iovid runpod volume delete <volume-id>
+```
+
+### `iovid stop`
+
 Stop running processes or tear down cloud resources. **Provider and model flags are required.**
 
 ```bash
-# Stop local FFmpeg processes
-iovid stop \
-  -p local_gpu \
-  -m ffmpeg
+# Stop local FFmpeg processes (terminates background workers)
+iovid stop -p local_gpu -m ffmpeg
 
-# Tear down RunPod endpoints (leaving volumes by default)
-iovid stop \
-  -p runpod \
-  -m ffmpeg
+# Tear down RunPod endpoints for a specific model
+iovid stop -p runpod -m ffmpeg
 
-# Tear down RunPod endpoints AND their attached network volumes
-iovid stop \
-  -p runpod \
-  -m ffmpeg \
-  --volumes \
-  --yes
+# Tear down endpoints and simultaneously delete their attached network volumes
+iovid stop -p runpod -m ffmpeg --volumes
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--provider` / `-p` | Provider to stop (required) |
+| `--model` / `-m` | Model name to stop (required) |
+| `--volumes` | Automatically discover and delete attached network volumes |
+| `--yes` / `-y` | Skip confirmation prompt for resource deletion |
 
 ## Requirements
 - `ffmpeg` must be installed and available in your PATH.
