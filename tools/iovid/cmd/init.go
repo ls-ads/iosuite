@@ -78,11 +78,12 @@ var startCmd = &cobra.Command{
 
 		if volumeSize > 0 {
 			fmt.Printf("Provisioning RunPod Network Volume (%d GB) in %s...\n", volumeSize, dataCenterIds[0])
-			volumeID, err := iocore.CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%s-%d", model, time.Now().Unix()), volumeSize, dataCenterIds[0])
+			vid, err := iocore.CreateNetworkVolume(ctx, key, fmt.Sprintf("io-vol-%s-%d", model, time.Now().Unix()), volumeSize, dataCenterIds[0])
 			if err != nil {
 				return fmt.Errorf("failed to create volume: %v", err)
 			}
-			fmt.Printf("Successfully created RunPod volume!\nVolume ID: %s\n", volumeID)
+			fmt.Printf("Successfully created RunPod volume!\nVolume ID: %s\n", vid)
+			modelCfg.NetworkVolumeID = vid
 			// Continue to provision the endpoint as well
 		}
 
