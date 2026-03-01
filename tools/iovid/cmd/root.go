@@ -5,12 +5,13 @@ import (
 )
 
 var (
-	input    string
-	output   string
-	provider string
-	apiKey   string
-	model    string
-	volume   bool
+	input     string
+	output    string
+	provider  string
+	apiKey    string
+	model     string
+	volume    bool
+	overwrite bool
 
 	// Shared RunPod flags
 	activeWorkers bool
@@ -46,4 +47,5 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&apiKey, "api-key", "k", "", "API key for remote provider")
 	rootCmd.PersistentFlags().StringVarP(&model, "model", "m", "", "Model name")
 	rootCmd.PersistentFlags().BoolVar(&volume, "volume", false, "Use RunPod network volume for processing")
+	rootCmd.PersistentFlags().BoolVar(&overwrite, "overwrite", false, "Reprocess all files even if output already exists (compatibility flag)")
 }

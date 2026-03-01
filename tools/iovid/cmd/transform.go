@@ -331,6 +331,11 @@ func init() {
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
+			if output == "" {
+				ext := filepath.Ext(input)
+				base := strings.TrimSuffix(filepath.Base(input), ext)
+				output = fmt.Sprintf("%s_transcode%s", base, ext)
+			}
 			ctx := context.Background()
 			cfg := makeFFmpegConfig()
 			return iocore.Transcode(ctx, cfg, input, output, vcodec, acodec, vbitrate, abitrate, crf)
@@ -341,6 +346,8 @@ func init() {
 	transcodeCmd.Flags().StringVar(&vbitrate, "vbitrate", "", "video bitrate (e.g. 5M, 1000k)")
 	transcodeCmd.Flags().StringVar(&abitrate, "abitrate", "", "audio bitrate (e.g. 128k, 192k)")
 	transcodeCmd.Flags().StringVar(&crf, "crf", "", "constant rate factor (e.g. 23, 28, 35)")
+	rootCmd.AddCommand(transcodeCmd)
+
 	// Concat
 	concatCmd := &cobra.Command{
 		Use:   "concat [input1] [input2]...",

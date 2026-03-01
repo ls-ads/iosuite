@@ -363,7 +363,7 @@ func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec,
 	if config != nil && config.Provider != "" {
 		p = config.Provider
 	}
-	isGPU := p == ProviderLocalGPU
+	isGPU := p == ProviderLocalGPU || p == ProviderRunPod
 
 	// Video Codec
 	if vcodec != "" {
@@ -371,21 +371,21 @@ func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec,
 		if isGPU {
 			switch vcodec {
 			case "h264":
-				if runtime.GOOS == "darwin" {
+				if runtime.GOOS == "darwin" && p != ProviderRunPod {
 					resolvedVCodec = "h264_videotoolbox"
 				} else {
 					resolvedVCodec = "h264_nvenc"
 					extraArgs = append(extraArgs, "-preset", "p4", "-tune", "hq")
 				}
 			case "hevc":
-				if runtime.GOOS == "darwin" {
+				if runtime.GOOS == "darwin" && p != ProviderRunPod {
 					resolvedVCodec = "hevc_videotoolbox"
 				} else {
 					resolvedVCodec = "hevc_nvenc"
 					extraArgs = append(extraArgs, "-preset", "p4", "-tune", "hq")
 				}
 			case "av1":
-				if runtime.GOOS == "darwin" {
+				if runtime.GOOS == "darwin" && p != ProviderRunPod {
 					// VideoToolbox AV1 encoding is only on very recent Macs (M3+), fallback to standard if needed
 				} else {
 					resolvedVCodec = "av1_nvenc"
@@ -427,6 +427,13 @@ func Transcode(ctx context.Context, config *FFmpegConfig, input, output, vcodec,
 	}
 	if crf != "" {
 		extraArgs = append(extraArgs, "-crf", crf)
+	}
+
+	if p == ProviderRunPod {
+		if config != nil && config.UseVolume {
+			return runRunPodVolumeFFmpeg(ctx, config, input, output, "", extraArgs)
+		}
+		return runRunPodFFmpeg(ctx, config, input, output, "", extraArgs)
 	}
 
 	// We can't use RunFFmpegAction for transcode because it forces -hwaccel cuda
