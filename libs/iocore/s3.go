@@ -39,6 +39,7 @@ func NewS3Client(ctx context.Context, region, accessKey, secretKey, volumeID str
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(endpoint)
+		o.Region = regionID
 		o.UsePathStyle = true
 	})
 

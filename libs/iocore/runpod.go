@@ -580,7 +580,7 @@ func ListNetworkVolumes(ctx context.Context, key string) ([]NetworkVolume, error
 // GetS3Endpoint returns the S3-compatible API endpoint for a specific region.
 func GetS3Endpoint(region string) string {
 	regionClean := strings.ToLower(strings.ReplaceAll(region, "_", "-"))
-	return fmt.Sprintf("https://s3api-%s.runpod.io/", regionClean)
+	return fmt.Sprintf("https://s3api-%s.runpod.io", regionClean)
 }
 
 // VolumeWorkflowConfig holds configuration for the high-level serverless volume workflow.
