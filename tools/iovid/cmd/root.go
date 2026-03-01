@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
 	"github.com/spf13/cobra"
 )
 
@@ -37,6 +41,13 @@ func resolveDefaults() {
 	}
 	if model == "" {
 		model = "ffmpeg"
+	}
+	// Automatically map an output file if the input exists but output does not
+	if input != "" && output == "" {
+		ext := filepath.Ext(input)
+		base := strings.TrimSuffix(filepath.Base(input), ext)
+		dir := filepath.Dir(input)
+		output = filepath.Join(dir, fmt.Sprintf("%s_out%s", base, ext))
 	}
 }
 

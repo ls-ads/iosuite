@@ -331,12 +331,6 @@ func init() {
 			if !iocore.IsVideo(input) {
 				return fmt.Errorf("input must be a video (.mp4, .mkv, .mov, etc.): %s", input)
 			}
-			if output == "" {
-				ext := filepath.Ext(input)
-				base := strings.TrimSuffix(filepath.Base(input), ext)
-				dir := filepath.Dir(input)
-				output = filepath.Join(dir, fmt.Sprintf("%s_out%s", base, ext))
-			}
 			ctx := context.Background()
 			cfg := makeFFmpegConfig()
 			return iocore.Transcode(ctx, cfg, input, output, vcodec, acodec, vbitrate, abitrate, crf)

@@ -59,19 +59,7 @@ var upscaleCmd = &cobra.Command{
 			return fmt.Errorf("input is required")
 		}
 
-		// Derive output if not specified
-		if output == "" {
-			info, err := os.Stat(input)
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				output = strings.TrimRight(input, string(filepath.Separator)) + "_out"
-			} else {
-				ext := filepath.Ext(input)
-				output = strings.TrimSuffix(input, ext) + "_out" + ext
-			}
-		}
+		resolveDefaults()
 
 		// Validate --format if explicitly set
 		if outputFormat != "" && outputFormat != "jpg" && outputFormat != "png" {

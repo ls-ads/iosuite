@@ -13,8 +13,8 @@ var convertCmd = &cobra.Command{
 	Short: "Convert/Process an image",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resolveDefaults()
-		if input == "" || output == "" {
-			return fmt.Errorf("input and output are required")
+		if input == "" {
+			return fmt.Errorf("input is required")
 		}
 
 		iocore.Info("Converting image via CLI", "input", input, "output", output)
