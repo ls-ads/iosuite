@@ -191,10 +191,17 @@ iovid stop \
   -p local_gpu \
   -m ffmpeg
 
-# Tear down RunPod endpoints
+# Tear down RunPod endpoints (leaving volumes by default)
 iovid stop \
   -p runpod \
   -m ffmpeg
+
+# Tear down RunPod endpoints AND their attached network volumes
+iovid stop \
+  -p runpod \
+  -m ffmpeg \
+  --volumes \
+  --yes
 ```
 
 ## Requirements

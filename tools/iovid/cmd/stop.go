@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	stopYes bool
+	stopYes     bool
+	stopVolumes bool
 )
 
 var stopCmd = &cobra.Command{
@@ -91,11 +92,59 @@ func runStopRunPod(ctx context.Context) error {
 	}
 
 	fmt.Printf("Successfully deleted %d RunPod endpoint(s).\n", deletedCount)
+
+	if stopVolumes {
+		volumeSet := make(map[string]bool)
+		for _, e := range endpoints {
+			if e.NetworkVolumeID != "" {
+				volumeSet[e.NetworkVolumeID] = true
+			}
+			for _, vID := range e.NetworkVolumeIDs {
+				if vID != "" {
+					volumeSet[vID] = true
+				}
+			}
+		}
+
+		if len(volumeSet) == 0 {
+			fmt.Println("No attached RunPod network volumes found to delete.")
+		} else {
+			fmt.Printf("\nFound %d attached network volume(s) to delete:\n", len(volumeSet))
+			for vID := range volumeSet {
+				fmt.Printf(" - Volume ID: %s\n", vID)
+			}
+
+			if !stopYes {
+				fmt.Print("Are you sure you want to delete these volumes? All data will be lost. (y/N): ")
+				var vResponse string
+				fmt.Scanln(&vResponse)
+				vResponse = strings.ToLower(strings.TrimSpace(vResponse))
+				if vResponse != "y" && vResponse != "yes" {
+					fmt.Println("Volume deletion aborted.")
+					return nil
+				}
+			}
+
+			vDeletedCount := 0
+			for vID := range volumeSet {
+				fmt.Printf("Deleting volume %s...\n", vID)
+				err := iocore.DeleteNetworkVolume(ctx, key, vID)
+				if err != nil {
+					fmt.Printf("Failed to delete volume %s: %v\n", vID, err)
+				} else {
+					vDeletedCount++
+				}
+			}
+			fmt.Printf("Successfully deleted %d network volume(s).\n", vDeletedCount)
+		}
+	}
+
 	return nil
 }
 
 func init() {
 	stopCmd.Flags().BoolVarP(&stopYes, "yes", "y", false, "Skip confirmation prompt")
+	stopCmd.Flags().BoolVar(&stopVolumes, "volumes", false, "Also delete any attached network volumes")
 
 	rootCmd.AddCommand(stopCmd)
 }

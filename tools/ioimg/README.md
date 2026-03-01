@@ -214,12 +214,16 @@ ioimg stop -p local_gpu -m ffmpeg
 
 # Tear down RunPod endpoints for a specific model
 ioimg stop -p runpod -m real-esrgan
+
+# Tear down endpoints and simultaneously delete their attached network volumes
+ioimg stop -p runpod -m real-esrgan --volumes
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--provider` / `-p` | Provider to stop (required) |
 | `--model` / `-m` | Model name to stop (required) |
+| `--volumes` | Automatically discover and delete attached network volumes |
 | `--yes` / `-y` | Skip confirmation prompt for resource deletion |
 
 ### `ioimg upscale start`
