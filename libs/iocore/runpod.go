@@ -647,14 +647,31 @@ func RunPodServerlessVolumeWorkflow(ctx context.Context, cfg VolumeWorkflowConfi
 		time.Sleep(5 * time.Second)
 	}
 
-	// 2. Setup S3 Client
+	// 3. Resolve Region from Volume (critical for S3 307 redirects)
+	region := cfg.Region
+	if volumeID != "" {
+		vols, err := ListNetworkVolumes(ctx, key)
+		if err == nil {
+			for _, v := range vols {
+				if v.ID == volumeID {
+					if v.DataCenterID != "" {
+						region = v.DataCenterID
+						status("infrastructure", fmt.Sprintf("Resolved volume region: %s", region))
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 4. Setup S3 Client
 	s3Access := os.Getenv("AWS_ACCESS_KEY_ID")
 	s3Secret := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	if s3Access == "" || s3Secret == "" {
 		return fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are strictly required for Network Volume access")
 	}
 
-	s3Client, err := NewS3Client(ctx, cfg.Region, s3Access, s3Secret, volumeID)
+	s3Client, err := NewS3Client(ctx, region, s3Access, s3Secret, volumeID)
 	if err != nil {
 		return fmt.Errorf("failed to setup S3 client: %v", err)
 	}
