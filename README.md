@@ -32,9 +32,9 @@ A high-performance, unified suite for image and video processing. Leveraging FFm
    ```bash
    # Upscale using your Network Volume (idempotent & efficient for large files)
    # iosuite will automatically discover the attached volume ID
+   # Notice we omit the output flag; iosuite securely auto-maps this to photo_out.jpg natively!
    ioimg upscale \
      --input photo.jpg \
-     --output photo_4x.jpg \
      --model real-esrgan \
      --provider runpod \
      --volume

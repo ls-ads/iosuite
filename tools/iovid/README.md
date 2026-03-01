@@ -14,7 +14,8 @@
 
 ### General Flags
 - `-i`, `--input`: Input video file.
-- `-o`, `--output`: Output file or directory path.
+- `-o`, `--output`: Output file or directory path. (Defaults to `input_name_out.ext` in the input's directory).
+- `--overwrite`: Reprocess all files even if output already exists (fails safe by default).
 - `-p`, `--provider`: Execution provider (`local_cpu`, `local_gpu`, `runpod`). (required for start/stop)
 - `-k`, `--api-key`: API key for remote execution.
 - `-m`, `--model`: Execution model. (required for start/stop)
