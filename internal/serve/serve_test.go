@@ -2,9 +2,7 @@ package serve
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,12 +14,12 @@ import (
 // provider without spinning up a real subprocess or RunPod call.
 type stubProvider struct {
 	startErr error
-	runFn    func(JobRequest) (*JobResponse, error)
+	runFn    func([]byte) ([]byte, error)
 }
 
 func (s *stubProvider) Start(context.Context) error { return s.startErr }
-func (s *stubProvider) Run(_ context.Context, j JobRequest) (*JobResponse, error) {
-	return s.runFn(j)
+func (s *stubProvider) Run(_ context.Context, b []byte) ([]byte, error) {
+	return s.runFn(b)
 }
 func (s *stubProvider) Close() error { return nil }
 
@@ -37,165 +35,165 @@ func newTestServer(t *testing.T, p Provider) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func TestRunsync_HappyPath(t *testing.T) {
+func TestRunsync_HappyPath_PassesThroughOpaque(t *testing.T) {
+	// Whatever the caller posts, the provider sees the SAME bytes.
+	// That's the contract — iosuite serve doesn't interpret the
+	// inner shape, so different *-serve modules with different input
+	// schemas all flow through unchanged.
+	caller := []byte(`{"input":{"images":[{"image_base64":"Zm9v"}],"some_future_field":42}}`)
+	worker := []byte(`{"status":"COMPLETED","output":{"outputs":[{"image_base64":"YmFy","exec_ms":42}]}}`)
+
+	var saw []byte
 	p := &stubProvider{
-		runFn: func(j JobRequest) (*JobResponse, error) {
-			if len(j.Input.Images) != 1 || j.Input.Images[0].ImageBase64 != "Zm9v" {
-				t.Errorf("provider got unexpected input: %+v", j)
-			}
-			return &JobResponse{
-				Status: "COMPLETED",
-				Output: JobOutput{Outputs: []ImageOutput{{ImageBase64: "YmFy", ExecMS: 42}}},
-			}, nil
+		runFn: func(b []byte) ([]byte, error) {
+			saw = append(saw[:0], b...)
+			return worker, nil
 		},
 	}
 	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	req := JobRequest{Input: JobInput{Images: []ImageInput{{ImageBase64: "Zm9v"}}}}
-	body, _ := json.Marshal(req)
-	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(string(body)))
+	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(string(caller)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, body = %s", resp.StatusCode, string(raw))
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
 	}
-	var got JobResponse
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatal(err)
+	if string(body) != string(worker) {
+		t.Errorf("response body = %q, want %q (opaque pass-through)", body, worker)
 	}
-	if got.Status != "COMPLETED" {
-		t.Errorf("status = %q, want COMPLETED", got.Status)
-	}
-	if len(got.Output.Outputs) != 1 || got.Output.Outputs[0].ImageBase64 != "YmFy" {
-		t.Errorf("output didn't round-trip: %+v", got)
+	if string(saw) != string(caller) {
+		t.Errorf("provider saw = %q, want %q (opaque pass-through)", saw, caller)
 	}
 }
 
-func TestRunsync_LegacySingleImageNormalised(t *testing.T) {
-	// Callers using the old shape (image_base64 at the top level)
-	// should be normalised into the array form so providers see one
-	// shape only.
-	p := &stubProvider{
-		runFn: func(j JobRequest) (*JobResponse, error) {
-			if len(j.Input.Images) != 1 || j.Input.Images[0].ImageBase64 != "Zm9v" {
-				return nil, fmt.Errorf("legacy shape not normalised: %+v", j.Input)
-			}
-			return &JobResponse{Status: "COMPLETED"}, nil
-		},
-	}
+func TestRunsync_RejectsMissingInput(t *testing.T) {
+	p := &stubProvider{runFn: func([]byte) ([]byte, error) {
+		t.Fatal("provider should not be called")
+		return nil, nil
+	}}
 	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	body := `{"input": {"image_base64": "Zm9v", "output_format": "jpg"}}`
-	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
+	cases := []string{
+		`{}`,                    // no input field
+		`{"input": null}`,       // explicit null
+		`{"other": {}}`,         // wrong key
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		raw, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d, body = %s", resp.StatusCode, string(raw))
+	for _, body := range cases {
+		resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Errorf("body %q: status = %d (want 400), resp = %s", body, resp.StatusCode, respBody)
+		}
 	}
 }
 
-func TestRunsync_RejectsEmptyInput(t *testing.T) {
-	srv := newTestServer(t, &stubProvider{})
+func TestRunsync_RejectsNonJSON(t *testing.T) {
+	p := &stubProvider{runFn: func([]byte) ([]byte, error) {
+		t.Fatal("provider should not be called")
+		return nil, nil
+	}}
+	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	body := `{"input": {}}`
-	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(body))
+	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader("not json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 400 {
-		t.Errorf("empty input should be 400, got %d", resp.StatusCode)
+		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
 func TestRunsync_ProviderErrorMapsTo502(t *testing.T) {
 	p := &stubProvider{
-		runFn: func(JobRequest) (*JobResponse, error) {
-			return nil, AsProviderError(errors.New("backend exploded"))
+		runFn: func([]byte) ([]byte, error) {
+			return nil, AsProviderError(errors.New("upstream is sad"))
 		},
 	}
 	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	body := `{"input": {"images": [{"image_base64": "Zm9v"}]}}`
-	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(body))
+	resp, err := http.Post(srv.URL+"/runsync", "application/json",
+		strings.NewReader(`{"input":{"x":1}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 502 {
-		t.Errorf("ProviderError should map to 502, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "upstream is sad") {
+		t.Errorf("body should contain underlying error: %s", body)
 	}
 }
 
 func TestRunsync_GenericErrorMapsTo500(t *testing.T) {
 	p := &stubProvider{
-		runFn: func(JobRequest) (*JobResponse, error) {
-			return nil, errors.New("client-side decode failure")
+		runFn: func([]byte) ([]byte, error) {
+			return nil, errors.New("internal goof")
 		},
 	}
 	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	body := `{"input": {"images": [{"image_base64": "Zm9v"}]}}`
-	resp, err := http.Post(srv.URL+"/runsync", "application/json", strings.NewReader(body))
+	resp, err := http.Post(srv.URL+"/runsync", "application/json",
+		strings.NewReader(`{"input":{"x":1}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 500 {
-		t.Errorf("non-provider error should map to 500, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
 }
 
 func TestRunsync_RejectsMethodOther(t *testing.T) {
-	srv := newTestServer(t, &stubProvider{})
+	p := &stubProvider{}
+	srv := newTestServer(t, p)
 	defer srv.Close()
+
 	resp, err := http.Get(srv.URL + "/runsync")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 405 {
-		t.Errorf("GET /runsync should be 405, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", resp.StatusCode)
 	}
 }
 
 func TestUpscaleAlias(t *testing.T) {
-	// `/upscale` is an alias for `/runsync` — same handler. Sanity
-	// check that the alias path is registered.
-	called := false
-	p := &stubProvider{
-		runFn: func(JobRequest) (*JobResponse, error) {
-			called = true
-			return &JobResponse{Status: "COMPLETED"}, nil
-		},
-	}
+	worker := []byte(`{"status":"COMPLETED","output":{}}`)
+	p := &stubProvider{runFn: func([]byte) ([]byte, error) { return worker, nil }}
 	srv := newTestServer(t, p)
 	defer srv.Close()
 
-	body := `{"input": {"images": [{"image_base64": "Zm9v"}]}}`
-	resp, err := http.Post(srv.URL+"/upscale", "application/json", strings.NewReader(body))
+	resp, err := http.Post(srv.URL+"/upscale", "application/json",
+		strings.NewReader(`{"input":{"images":[{"image_base64":"Zm9v"}]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if !called {
-		t.Errorf("/upscale should reach the same handler as /runsync")
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("/upscale status = %d, body = %s", resp.StatusCode, body)
 	}
 }
 
 func TestHealth(t *testing.T) {
-	srv := newTestServer(t, &stubProvider{})
+	p := &stubProvider{}
+	srv := newTestServer(t, p)
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -204,6 +202,10 @@ func TestHealth(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Errorf("/health should be 200, got %d", resp.StatusCode)
+		t.Errorf("status = %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"ok"`) {
+		t.Errorf("body = %s", body)
 	}
 }

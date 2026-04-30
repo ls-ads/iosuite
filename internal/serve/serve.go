@@ -19,31 +19,32 @@
 //	         │   • RemoteProvider (later)│
 //	         └───────────────────────────┘
 //
-// Wire shape (RunPod-compatible):
+// Wire shape (envelope-only — iosuite is opaque to the inner contents):
 //
 //	POST /runsync
-//	{"input": {
-//	    "images": [{"image_base64": "..."}, ...],
-//	    "output_format": "jpg" | "png",
-//	    "tile": true | false
-//	}}
+//	{"input": {<tool-specific fields>}}
 //
-//	→ {"status": "COMPLETED", "output": {
-//	    "outputs": [{"image_base64": "...", "exec_ms": ..., ...}],
-//	    "_diagnostics": {...}
-//	}}
+//	→ {"status": "COMPLETED", "output": {<tool-specific fields>}}
+//
+// The daemon does NOT interpret `input.*` or `output.*`. Each *-serve
+// module owns its own input/output schema; iosuite only insists on
+// the `input` envelope key being present (so callers get a clear
+// error rather than a confusing pass-through 500 if they post an
+// arbitrary blob).
 //
 // The `/upscale` path is kept as an alias of `/runsync` for callers
 // that prefer the more descriptive name.
 package serve
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -51,94 +52,29 @@ import (
 	"time"
 )
 
-// JobInput is the inner `input` field of a /runsync request. Mirrors
-// the shape real-esrgan-serve's RunPod handler accepts (`BatchPayload`
-// in providers/runpod/handler.py). Optional fields default at the
-// worker side; we just pass them through.
-type JobInput struct {
-	Images []ImageInput `json:"images,omitempty"`
-
-	// Legacy single-image fields. Not produced by current iosuite.io
-	// callers but accepted so a self-hoster pointing curl at the
-	// daemon can use the simpler shape.
-	ImageBase64 string `json:"image_base64,omitempty"`
-	ImageURL    string `json:"image_url,omitempty"`
-	ImagePath   string `json:"image_path,omitempty"`
-
-	OutputFormat  string `json:"output_format,omitempty"`
-	Tile          bool   `json:"tile,omitempty"`
-	DiscardOutput bool   `json:"discard_output,omitempty"`
-}
-
-// ImageInput is one entry of the `images` array.
-type ImageInput struct {
-	ImageBase64  string `json:"image_base64,omitempty"`
-	ImageURL     string `json:"image_url,omitempty"`
-	ImagePath    string `json:"image_path,omitempty"`
-	OutputFormat string `json:"output_format,omitempty"`
-	OutputPath   string `json:"output_path,omitempty"`
-}
-
-// JobRequest is the outer envelope POSTed to /runsync. Mirrors
-// RunPod's contract — the `input` field carries the actual job.
-type JobRequest struct {
-	Input JobInput `json:"input"`
-}
-
-// JobOutput is the inner result envelope. RunPod-shaped.
-type JobOutput struct {
-	Outputs     []ImageOutput   `json:"outputs"`
-	Model       string          `json:"model,omitempty"`
-	Diagnostics json.RawMessage `json:"_diagnostics,omitempty"`
-
-	// Legacy single-image fields surfaced when the request was a
-	// 1-element batch (back-compat with the pre-batched response
-	// shape).
-	ImageBase64      string `json:"image_base64,omitempty"`
-	OutputResolution string `json:"output_resolution,omitempty"`
-	InputResolution  string `json:"input_resolution,omitempty"`
-}
-
-// ImageOutput is one entry of `outputs[]`.
-type ImageOutput struct {
-	ImageBase64      string `json:"image_base64,omitempty"`
-	OutputPath       string `json:"output_path,omitempty"`
-	OutputSizeBytes  int64  `json:"output_size_bytes,omitempty"`
-	InputResolution  string `json:"input_resolution,omitempty"`
-	OutputResolution string `json:"output_resolution,omitempty"`
-	OutputFormat     string `json:"output_format,omitempty"`
-	ExecMS           int    `json:"exec_ms,omitempty"`
-}
-
-// JobResponse is the full /runsync envelope. `status` mirrors RunPod's
-// terminal states; the daemon always returns COMPLETED on success and
-// uses HTTP non-2xx for failures so callers can branch on either.
-type JobResponse struct {
-	Status string    `json:"status"`
-	Output JobOutput `json:"output"`
-}
-
 // Provider is what /runsync routes to. Implementations own all the
 // provider-specific I/O (subprocess management, RunPod HTTP, etc.)
-// so the HTTP layer stays trivial.
+// so the HTTP layer stays trivial — Run sees a raw request body and
+// returns a raw response body.
 type Provider interface {
 	// Start initializes the provider. For LocalProvider this spawns
 	// real-esrgan-serve serve and waits for it to be ready. For
 	// RunPodProvider this probes the upstream /health.
 	Start(ctx context.Context) error
 
-	// Run executes one inference job. Returns the response envelope.
-	// The HTTP layer is responsible only for marshalling +
-	// status-code mapping; everything else is the provider's job.
-	Run(ctx context.Context, job JobRequest) (*JobResponse, error)
+	// Run executes one inference job. Receives the already-validated
+	// request body (`{"input": ...}` envelope) and returns the
+	// upstream's response body unchanged. Errors that look like
+	// upstream failures should be wrapped with AsProviderError so
+	// the HTTP layer maps them to 502 instead of 500.
+	Run(ctx context.Context, requestBody []byte) ([]byte, error)
 
 	// Close tears the provider down. Must be safe to call multiple
 	// times. LocalProvider reaps its subprocess here.
 	Close() error
 }
 
-// Options is the full configuration surface for the daemon. Fields
-// are filled by the cobra layer from flags + sticky config.
+// Options is the full configuration surface for the daemon.
 type Options struct {
 	// Bind address — "127.0.0.1" by default, "0.0.0.0" to expose to
 	// the LAN (opt-in only — the dev-friendly default keeps the API
@@ -150,10 +86,9 @@ type Options struct {
 	// subprocess so they don't collide.
 	Port int
 
-	// Provider is wired by the caller — Phase 4 ships local + runpod
-	// implementations; remote follows. The caller is responsible for
-	// passing it in started state? No — Run calls Start so the
-	// listener never opens before the backend is ready.
+	// Provider is wired by the caller. The caller is NOT responsible
+	// for pre-starting it — Run calls Provider.Start so the listener
+	// never opens before the backend is ready.
 	Provider Provider
 }
 
@@ -216,6 +151,14 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
+// envelopeProbe matches just enough of the request to confirm the
+// caller posted the expected `{"input": ...}` envelope. We don't
+// decode the inner contents — those are tool-specific and pass
+// through to the provider unchanged.
+type envelopeProbe struct {
+	Input json.RawMessage `json:"input"`
+}
+
 func makeJobHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -238,37 +181,30 @@ func makeJobHandler(p Provider) http.HandlerFunc {
 		clen := r.ContentLength
 		logf("req.start id=%s path=%s bytes=%d remote=%s", reqID, path, clen, r.RemoteAddr)
 
-		var req JobRequest
-		dec := json.NewDecoder(r.Body)
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
-			logf("req.bad_json id=%s err=%q dur=%s", reqID, err.Error(), time.Since(start))
-			http.Error(w, fmt.Sprintf("decode JSON: %v", err), http.StatusBadRequest)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logf("req.read_err id=%s err=%q dur=%s", reqID, err.Error(), time.Since(start))
+			http.Error(w, fmt.Sprintf("read body: %v", err), http.StatusBadRequest)
 			return
 		}
-		// Normalise legacy single-image input into the array form so
-		// providers only deal with one shape downstream.
-		if len(req.Input.Images) == 0 {
-			if req.Input.ImageBase64 != "" || req.Input.ImageURL != "" || req.Input.ImagePath != "" {
-				req.Input.Images = []ImageInput{{
-					ImageBase64: req.Input.ImageBase64,
-					ImageURL:    req.Input.ImageURL,
-					ImagePath:   req.Input.ImagePath,
-				}}
-				req.Input.ImageBase64 = ""
-				req.Input.ImageURL = ""
-				req.Input.ImagePath = ""
-			}
-		}
-		if len(req.Input.Images) == 0 {
-			logf("req.empty_images id=%s dur=%s", reqID, time.Since(start))
-			http.Error(w, `request needs "input.images" (array) or one of input.image_base64/url/path`, http.StatusBadRequest)
-			return
-		}
-		logf("req.dispatch id=%s images=%d tile=%t fmt=%s discard=%t",
-			reqID, len(req.Input.Images), req.Input.Tile, req.Input.OutputFormat, req.Input.DiscardOutput)
 
-		resp, err := p.Run(r.Context(), req)
+		// Validate the envelope without interpreting its contents.
+		// `{"input": ...}` must be present; what's inside is the
+		// tool's contract with its own worker.
+		var probe envelopeProbe
+		if err := json.Unmarshal(body, &probe); err != nil {
+			logf("req.bad_json id=%s err=%q dur=%s", reqID, err.Error(), time.Since(start))
+			http.Error(w, fmt.Sprintf("decode JSON envelope: %v", err), http.StatusBadRequest)
+			return
+		}
+		if len(probe.Input) == 0 || bytes.Equal(probe.Input, []byte("null")) {
+			logf("req.missing_input id=%s dur=%s", reqID, time.Since(start))
+			http.Error(w, `request needs an "input" field at the top level`, http.StatusBadRequest)
+			return
+		}
+		logf("req.dispatch id=%s body_size=%d", reqID, len(body))
+
+		respBody, err := p.Run(r.Context(), body)
 		if err != nil {
 			var perr *ProviderError
 			if errors.As(err, &perr) {
@@ -280,9 +216,9 @@ func makeJobHandler(p Provider) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		logf("req.ok id=%s outputs=%d dur=%s", reqID, len(resp.Output.Outputs), time.Since(start))
+		logf("req.ok id=%s body_size=%d dur=%s", reqID, len(respBody), time.Since(start))
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		_, _ = w.Write(respBody)
 	}
 }
 

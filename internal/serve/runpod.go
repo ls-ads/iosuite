@@ -1,10 +1,11 @@
 // RunPodProvider — `iosuite serve --provider runpod` backend.
 //
-// Forwards the daemon's JobRequest to RunPod's serverless API
+// Forwards the raw request body to RunPod's serverless API
 // (/runsync, falling back to /run + /status polling on cold start)
-// and parses the response. The wire shape on iosuite serve's side
-// matches RunPod's exactly, so the provider is mostly transport —
-// add auth, post, parse, return.
+// and returns the raw response body. The wire shape between iosuite
+// serve and RunPod is identical, so the provider is mostly transport —
+// add auth, post, parse the envelope's `status` to decide whether to
+// poll, return.
 //
 // iosuite.io's `submit_upscale_batch` already sends RunPod-shaped
 // JSON; pointing it at `iosuite serve --provider runpod` is a one-line
@@ -39,7 +40,7 @@ type RunPodProviderOptions struct {
 	SyncTimeout time.Duration
 
 	// PollMax — longest we poll /status before giving up. Default
-	// 300 s mirrors iosuite.io's backend.
+	// 10 m mirrors the iosuite.io client cap.
 	PollMax time.Duration
 }
 
@@ -104,56 +105,63 @@ func (r *RunPodProvider) Start(ctx context.Context) error {
 	return fmt.Errorf("runpod /health: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
-// Run forwards the JobRequest to RunPod /runsync and returns the
-// response. The request shape iosuite serve received matches what
-// RunPod's worker expects, so nothing to translate.
-func (r *RunPodProvider) Run(ctx context.Context, job JobRequest) (*JobResponse, error) {
-	bodyJSON, err := json.Marshal(job)
-	if err != nil {
-		return nil, err
-	}
-
+// Run forwards the raw request body to RunPod /runsync and returns
+// the raw response body. Pass-through; iosuite doesn't interpret
+// the inner contents. Status polling for queued/in-progress jobs
+// happens internally so the caller sees a single round-trip.
+func (r *RunPodProvider) Run(ctx context.Context, requestBody []byte) ([]byte, error) {
 	start := time.Now()
 	syncURL := fmt.Sprintf("%s/%s/runsync", runpodBase, r.opts.EndpointID)
-	logf("runpod.runsync.post images=%d bytes=%d", len(job.Input.Images), len(bodyJSON))
-	resp, err := r.post(ctx, syncURL, bodyJSON)
+	logf("runpod.runsync.post bytes=%d", len(requestBody))
+
+	respBody, err := r.post(ctx, syncURL, requestBody)
 	if err != nil {
 		logf("runpod.runsync.err err=%q dur=%s", err.Error(), time.Since(start))
 		return nil, AsProviderError(err)
 	}
-	logf("runpod.runsync.resp status=%s id=%s dur=%s", resp.Status, resp.ID, time.Since(start))
-	if resp.Status == "IN_QUEUE" || resp.Status == "IN_PROGRESS" {
-		jobID := resp.ID
+
+	// Peek at the envelope to decide whether to poll. We only need
+	// `status` and `id` — everything else passes through unchanged.
+	status, jobID := peekStatusAndID(respBody)
+	logf("runpod.runsync.resp status=%s id=%s dur=%s", status, jobID, time.Since(start))
+
+	if status == "IN_QUEUE" || status == "IN_PROGRESS" {
 		if jobID == "" {
-			return nil, AsProviderError(fmt.Errorf("runpod %s but no job id in response", resp.Status))
+			return nil, AsProviderError(fmt.Errorf("runpod %s but no job id in response", status))
 		}
-		resp, err = r.pollUntilDone(ctx, jobID)
+		respBody, err = r.pollUntilDone(ctx, jobID)
 		if err != nil {
 			logf("runpod.poll.err job=%s err=%q dur=%s", jobID, err.Error(), time.Since(start))
 			return nil, AsProviderError(err)
 		}
-		logf("runpod.poll.done job=%s status=%s dur=%s", jobID, resp.Status, time.Since(start))
+		status, _ = peekStatusAndID(respBody)
+		logf("runpod.poll.done job=%s status=%s dur=%s", jobID, status, time.Since(start))
 	}
-	if resp.Status != "COMPLETED" {
-		return nil, AsProviderError(fmt.Errorf("runpod terminal status: %s", resp.Status))
+
+	if status != "COMPLETED" {
+		return nil, AsProviderError(fmt.Errorf("runpod terminal status: %s", status))
 	}
-	return &JobResponse{Status: "COMPLETED", Output: resp.Output}, nil
+	return respBody, nil
 }
 
 // Close — RunPodProvider holds no long-lived resources beyond the
 // http.Client (which is GC'd).
 func (r *RunPodProvider) Close() error { return nil }
 
-// runPodEnvelope is the loosely-typed envelope RunPod returns from
-// /runsync and /status. It carries a `status` field, an `id` (only on
-// /runsync responses that hit IN_QUEUE), and the worker's `output`.
-type runPodEnvelope struct {
-	Status string    `json:"status"`
-	ID     string    `json:"id,omitempty"`
-	Output JobOutput `json:"output"`
+// peekStatusAndID extracts just the two envelope fields we care
+// about, leaving the rest of the bytes untouched. Avoids
+// round-tripping the (potentially large) output payload through a
+// typed Go struct + re-marshal.
+func peekStatusAndID(body []byte) (status, id string) {
+	var env struct {
+		Status string `json:"status"`
+		ID     string `json:"id,omitempty"`
+	}
+	_ = json.Unmarshal(body, &env)
+	return env.Status, env.ID
 }
 
-func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) (*runPodEnvelope, error) {
+func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -172,14 +180,10 @@ func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) (*ru
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("runpod %s: HTTP %d: %s", url, resp.StatusCode, truncate(string(respBody), 300))
 	}
-	var env runPodEnvelope
-	if err := json.Unmarshal(respBody, &env); err != nil {
-		return nil, fmt.Errorf("runpod %s: parse: %w", url, err)
-	}
-	return &env, nil
+	return respBody, nil
 }
 
-func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (*runPodEnvelope, error) {
+func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) ([]byte, error) {
 	statusURL := fmt.Sprintf("%s/%s/status/%s", runpodBase, r.opts.EndpointID, jobID)
 	deadline := time.Now().Add(r.opts.PollMax)
 	tick := time.NewTicker(2 * time.Second)
@@ -196,15 +200,12 @@ func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (*runP
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("runpod /status: HTTP %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 		}
-		var env runPodEnvelope
-		if err := json.Unmarshal(respBody, &env); err != nil {
-			return nil, fmt.Errorf("runpod /status: parse: %w", err)
-		}
-		switch env.Status {
+		status, _ := peekStatusAndID(respBody)
+		switch status {
 		case "COMPLETED":
-			return &env, nil
+			return respBody, nil
 		case "FAILED", "CANCELLED", "TIMED_OUT":
-			return nil, fmt.Errorf("runpod job %s: %s", jobID, env.Status)
+			return nil, fmt.Errorf("runpod job %s: %s", jobID, status)
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("runpod job %s still running after %s", jobID, r.opts.PollMax)
