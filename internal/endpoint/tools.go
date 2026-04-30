@@ -23,6 +23,11 @@ type Tool struct {
 	ContainerDiskGB int
 	WorkersMax      int
 	IdleTimeoutS    int
+	// Flashboot is the per-tool default for RunPod FlashBoot
+	// (snapshot resume). Strong default for all known tools — the
+	// images are large enough that re-pulling on every cold start
+	// dominates user-visible latency. Override via --flashboot=false.
+	Flashboot bool
 }
 
 // Tools is the iosuite-known catalog. New tools land here when the
@@ -38,6 +43,10 @@ var Tools = map[string]Tool{
 		ContainerDiskGB: 10,
 		WorkersMax:      2,
 		IdleTimeoutS:    30,
+		// FlashBoot on. The trt image is ~3 GB and the TensorRT
+		// engine load takes ~30 s on top of the pull; snapshot
+		// resume drops cold start from ~45 s to ~5 s.
+		Flashboot: true,
 	},
 	// Future:
 	//   "whisper":          {Image: "ghcr.io/ls-ads/whisper-serve:..."}

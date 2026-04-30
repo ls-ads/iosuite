@@ -317,13 +317,17 @@ $RUNPOD_API_KEY env, or [runpod] api_key in ~/.config/iosuite/config.toml.`)
 func cmdEndpointDeploy(args []string) error {
 	fs := flag.NewFlagSet("endpoint deploy", flag.ExitOnError)
 	var (
-		provider     = fs.String("provider", "runpod", "Provider (runpod is the only supported value today)")
-		tool         = fs.String("tool", "real-esrgan", "Tool to deploy (real-esrgan)")
-		gpuClass     = fs.String("gpu-class", "rtx-4090", "GPU class — rtx-4090, rtx-3090, l40s, etc.")
-		name         = fs.String("name", "", "Endpoint name (default: <tool>-<gpu-class>)")
-		apiKey       = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
-		workersMax   = fs.Int("workers-max", 0, "Max concurrent workers (0 = tool default)")
-		idleTimeout  = fs.Int("idle-timeout", 0, "Worker idle timeout in seconds (0 = tool default)")
+		provider    = fs.String("provider", "runpod", "Provider (runpod is the only supported value today)")
+		tool        = fs.String("tool", "real-esrgan", "Tool to deploy (real-esrgan)")
+		gpuClass    = fs.String("gpu-class", "rtx-4090", "GPU class — rtx-4090, rtx-3090, l40s, etc.")
+		name        = fs.String("name", "", "Endpoint name (default: <tool>-<gpu-class>)")
+		apiKey      = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+		workersMax  = fs.Int("workers-max", 0, "Max concurrent workers (0 = tool default)")
+		idleTimeout = fs.Int("idle-timeout", 0, "Worker idle timeout in seconds (0 = tool default)")
+		// Tri-state flag: --flashboot, --no-flashboot, or unset (use
+		// tool default). Go's flag package only does true booleans;
+		// we model the unset case by walking fs.Visit() after Parse.
+		flashboot = fs.Bool("flashboot", true, "Enable RunPod FlashBoot (snapshot resume) for faster cold starts")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), `Usage: iosuite endpoint deploy [flags]
@@ -344,6 +348,15 @@ Flags:`)
 		return err
 	}
 	key := resolveRunpodAPIKey(*apiKey, cfg)
+	// Distinguish "user passed --flashboot=…" from "user didn't pass
+	// it"; the endpoint package needs the latter to fall back to the
+	// per-tool default. flag.Visit walks only flags that were set.
+	var flashbootSet bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "flashboot" {
+			flashbootSet = true
+		}
+	})
 	in := endpoint.DeployInput{
 		Provider:     *provider,
 		Tool:         *tool,
@@ -353,6 +366,9 @@ Flags:`)
 		WorkersMax:   *workersMax,
 		IdleTimeoutS: *idleTimeout,
 		UserAgent:    fmt.Sprintf("iosuite/%s", version.Version),
+	}
+	if flashbootSet {
+		in.Flashboot = flashboot
 	}
 	res, err := endpoint.Deploy(context.Background(), in)
 	if err != nil {

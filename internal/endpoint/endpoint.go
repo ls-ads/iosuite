@@ -40,14 +40,19 @@ const (
 
 // DeployInput captures everything `iosuite endpoint deploy` needs.
 type DeployInput struct {
-	Provider     string  // ProviderRunPod
-	Tool         string  // "real-esrgan" (round 2 only)
-	GPUClass     string  // "rtx-4090" etc; mapped to a RunPod pool
-	Name         string  // endpoint name; auto-derived if empty
-	APIKey       string  // RunPod API key
-	WorkersMax   int     // 0 → tool default
-	IdleTimeoutS int     // 0 → tool default
-	UserAgent    string  // surfaced to RunPod logs; iosuite/<version>
+	Provider     string // ProviderRunPod
+	Tool         string // "real-esrgan" (round 2 only)
+	GPUClass     string // "rtx-4090" etc; mapped to a RunPod pool
+	Name         string // endpoint name; auto-derived if empty
+	APIKey       string // RunPod API key
+	WorkersMax   int    // 0 → tool default
+	IdleTimeoutS int    // 0 → tool default
+	// Flashboot enables RunPod FlashBoot snapshot resume on the
+	// endpoint. Pointer-typed so the cobra layer can distinguish
+	// "user didn't pass --flashboot" (nil → use the tool default)
+	// from an explicit --flashboot=false override.
+	Flashboot *bool
+	UserAgent string // surfaced to RunPod logs; iosuite/<version>
 }
 
 // DeployResult carries the outputs of a successful deploy.
@@ -57,6 +62,7 @@ type DeployResult struct {
 	TemplateID   string
 	Image        string
 	GPUPool      string
+	Flashboot    bool
 }
 
 // Deploy runs the full create-or-update flow. Idempotent: re-running
@@ -114,6 +120,10 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("look up endpoint: %w", err)
 	}
+	flashboot := tool.Flashboot
+	if in.Flashboot != nil {
+		flashboot = *in.Flashboot
+	}
 	epInput := runpod.SaveEndpointInput{
 		Name:         name,
 		TemplateID:   templateID,
@@ -121,6 +131,7 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 		WorkersMin:   0,
 		WorkersMax:   defaultIfZero(in.WorkersMax, tool.WorkersMax),
 		IdleTimeoutS: defaultIfZero(in.IdleTimeoutS, tool.IdleTimeoutS),
+		Flashboot:    flashboot,
 	}
 	if existing != nil {
 		epInput.ExistingID = existing.ID
@@ -136,6 +147,7 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 		TemplateID:   templateID,
 		Image:        tool.Image,
 		GPUPool:      pool,
+		Flashboot:    flashboot,
 	}, nil
 }
 
@@ -194,6 +206,7 @@ func PrintDeploy(w io.Writer, r *DeployResult) {
 	fmt.Fprintf(w, "  template id:   %s\n", r.TemplateID)
 	fmt.Fprintf(w, "  image:         %s\n", r.Image)
 	fmt.Fprintf(w, "  gpu pool:      %s\n", r.GPUPool)
+	fmt.Fprintf(w, "  flashboot:     %t\n", r.Flashboot)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "ready-to-use env line for clients:")
 	fmt.Fprintf(w, "  export RUNPOD_ENDPOINT_ID=%s\n", r.EndpointID)
