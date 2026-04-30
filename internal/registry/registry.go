@@ -57,6 +57,17 @@ var Tools = map[string]Entry{
 // version's deploy/runpod.json. version may be empty to use the
 // tool's StableVersion.
 func ManifestURL(tool, version string) (string, error) {
+	return resolveDeployFile(tool, version, "deploy/runpod.json")
+}
+
+// BenchmarkURL returns the raw-GitHub URL for the given tool +
+// version's deploy/benchmark.json. Same convention as ManifestURL —
+// versioned with the *-serve repo's git tags.
+func BenchmarkURL(tool, version string) (string, error) {
+	return resolveDeployFile(tool, version, "deploy/benchmark.json")
+}
+
+func resolveDeployFile(tool, version, relPath string) (string, error) {
 	e, ok := Tools[tool]
 	if !ok {
 		return "", fmt.Errorf("unknown tool %q. Known: %s", tool, strings.Join(Names(), ", "))
@@ -69,8 +80,8 @@ func ManifestURL(tool, version string) (string, error) {
 		return "", fmt.Errorf("tool %q has no StableVersion and no --version was passed", tool)
 	}
 	return fmt.Sprintf(
-		"https://raw.githubusercontent.com/%s/%s/%s/deploy/runpod.json",
-		e.Owner, e.Repo, v,
+		"https://raw.githubusercontent.com/%s/%s/%s/%s",
+		e.Owner, e.Repo, v, relPath,
 	), nil
 }
 

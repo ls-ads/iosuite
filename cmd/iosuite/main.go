@@ -25,6 +25,10 @@ import (
 	"os/exec"
 	"time"
 
+	"encoding/base64"
+	"strings"
+
+	"iosuite.io/internal/benchmark"
 	"iosuite.io/internal/config"
 	"iosuite.io/internal/doctor"
 	"iosuite.io/internal/endpoint"
@@ -286,15 +290,16 @@ Flags:`)
 }
 
 // cmdEndpoint dispatches `iosuite endpoint <subcommand>`. Sub-subs
-// (deploy / list / destroy) parse their own flag sets.
+// (deploy / list / destroy / benchmark) parse their own flag sets.
 func cmdEndpoint(args []string) error {
 	if len(args) == 0 {
 		fmt.Println(`Usage: iosuite endpoint <subcommand> [flags]
 
 Subcommands:
-  deploy    Create or update a serverless endpoint on a provider
-  list      List existing endpoints
-  destroy   Delete an endpoint
+  deploy     Create or update a serverless endpoint on a provider
+  list       List existing endpoints
+  destroy    Delete an endpoint
+  benchmark  Run the tool's published benchmark suite against an endpoint
 
 Each subcommand accepts --provider runpod (the only supported provider
 in this round). RunPod credentials come from --runpod-api-key flag,
@@ -309,6 +314,8 @@ $RUNPOD_API_KEY env, or [runpod] api_key in ~/.config/iosuite/config.toml.`)
 		return cmdEndpointList(rest)
 	case "destroy":
 		return cmdEndpointDestroy(rest)
+	case "benchmark":
+		return cmdEndpointBenchmark(rest)
 	case "-h", "--help", "help":
 		return cmdEndpoint(nil)
 	default:
@@ -474,6 +481,144 @@ func cmdEndpointDestroy(args []string) error {
 	}
 	fmt.Printf("deleted endpoint: %s\n", deleted)
 	return nil
+}
+
+// cmdEndpointBenchmark drives the workload declared in a *-serve
+// module's deploy/benchmark.json against a deployed endpoint.
+// iosuite owns the wire (POST loop, timing, percentile math); the
+// serve module owns what to send and what to measure.
+func cmdEndpointBenchmark(args []string) error {
+	fs := flag.NewFlagSet("endpoint benchmark", flag.ExitOnError)
+	var (
+		provider          = fs.String("provider", "runpod", "Provider (runpod is the only supported value today)")
+		tool              = fs.String("tool", "real-esrgan", "Tool whose benchmark manifest to run")
+		endpointID        = fs.String("endpoint-id", "", "RunPod endpoint id to benchmark (required)")
+		apiKey            = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+		manifestVersion   = fs.String("version", "", "Git tag of the *-serve repo to read the benchmark manifest from (default: registry's stable version)")
+		benchmarkPath     = fs.String("benchmark-manifest", "", "Read benchmark manifest from a local file instead of fetching by tool+version")
+		inputResourcePath = fs.String("input-resource", "", "Read the benchmark input from a local file instead of fetching from the *-serve repo (paired with --benchmark-manifest for offline dev)")
+	)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `Usage: iosuite endpoint benchmark [flags]
+
+Run a tool's published benchmark workload against a deployed
+endpoint. The serve module owns the workload (input image, request
+shape, metrics); iosuite owns the wire.
+
+Flags:`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *provider != "runpod" {
+		return fmt.Errorf("provider %q is not supported (only 'runpod' is implemented)", *provider)
+	}
+	if *endpointID == "" {
+		return fmt.Errorf("--endpoint-id is required")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	key := resolveRunpodAPIKey(*apiKey, cfg)
+	if key == "" {
+		return fmt.Errorf("RunPod API key required (--runpod-api-key, RUNPOD_API_KEY, or [runpod] api_key in config)")
+	}
+
+	ctx := context.Background()
+
+	// Resolve the benchmark manifest. Local file wins (dev override);
+	// otherwise fetch from the *-serve repo at the requested tag.
+	var (
+		bench       *manifest.BenchmarkManifest
+		bSource     string
+		baseURL     string
+		fetchedFile bool
+	)
+	if *benchmarkPath != "" {
+		bench, err = manifest.LoadBenchmarkFile(*benchmarkPath)
+		if err != nil {
+			return err
+		}
+		bSource = *benchmarkPath
+		// For input-resource resolution we use a file:// scheme so
+		// FetchInputResource reads from disk relative to the manifest.
+		// Caller may pass --input-resource explicitly to skip that.
+		baseURL = "file://" + *benchmarkPath
+	} else {
+		url, err := registry.BenchmarkURL(*tool, *manifestVersion)
+		if err != nil {
+			return err
+		}
+		bench, err = manifest.FetchBenchmark(ctx, url)
+		if err != nil {
+			return err
+		}
+		bSource = url
+		baseURL = url
+		fetchedFile = true
+	}
+	_ = fetchedFile
+
+	// Fetch the input image. --input-resource takes precedence; else
+	// resolve relative to the manifest's source.
+	var inputBytes []byte
+	if *inputResourcePath != "" {
+		inputBytes, err = os.ReadFile(*inputResourcePath)
+		if err != nil {
+			return fmt.Errorf("read --input-resource: %w", err)
+		}
+	} else {
+		inputBytes, err = manifest.FetchInputResource(ctx, baseURL, bench.InputResource)
+		if err != nil {
+			return err
+		}
+	}
+
+	// inputBytes can be either raw image bytes OR an already-base64
+	// string (real-esrgan-serve ships its bench input pre-encoded).
+	// Detect the b64 case so we don't double-encode in buildRequestBody.
+	if isLikelyBase64(inputBytes) {
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(inputBytes)))
+		if err == nil {
+			inputBytes = decoded
+		}
+	}
+
+	fmt.Printf("benchmark: tool=%s endpoint=%s warmup=%d measure=%d\n",
+		bench.Tool, *endpointID, bench.Warmup, bench.Measure)
+	fmt.Printf("manifest:  %s\n", bSource)
+	fmt.Println()
+
+	results, err := benchmark.Run(ctx, *endpointID, key, bench, inputBytes)
+	if err != nil {
+		return err
+	}
+	fmt.Print(benchmark.FormatResults(results))
+	return nil
+}
+
+// isLikelyBase64 returns true if the input looks like base64-encoded
+// text (single line, only base64 alphabet chars). Real-esrgan-serve's
+// deploy/bench/*.b64 files ship in this form; a future tool might
+// ship raw bytes instead — both should work without operator
+// intervention.
+func isLikelyBase64(b []byte) bool {
+	s := strings.TrimSpace(string(b))
+	if s == "" || len(s) < 8 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '+' || c == '/' || c == '=' || c == '\n' || c == '\r' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // resolveRunpodAPIKey applies the precedence: flag > env > config.
