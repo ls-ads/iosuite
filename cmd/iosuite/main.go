@@ -245,10 +245,14 @@ Flags:`)
 		if key == "" {
 			return fmt.Errorf("runpod provider requires API key (--runpod-api-key, RUNPOD_API_KEY env, or [runpod] api_key in config)")
 		}
+		// Tile is now per-request — caller sets it in the JobRequest
+		// payload so a single daemon can serve mixed traffic. The
+		// --tile flag is kept for compat but no longer applies at
+		// daemon level; document accordingly.
+		_ = *tile
 		rp := serve.NewRunPod(serve.RunPodProviderOptions{
 			EndpointID: eid,
 			APIKey:     key,
-			Tile:       *tile,
 		})
 		return serve.Run(context.Background(), serve.Options{
 			Bind:     *bind,

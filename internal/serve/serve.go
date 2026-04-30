@@ -3,31 +3,45 @@
 // actually runs the inference.
 //
 // The daemon is what iosuite.io's FastAPI backend talks to in Phase 4
-// (and what self-hosters point their own apps at). One HTTP shape, one
-// auth model, one config — provider routing is internal:
+// (and what self-hosters point their own apps at). The wire shape
+// MIRRORS RunPod's serverless API one-to-one so iosuite.io's existing
+// `submit_upscale_batch` works unchanged — the only diff is the URL.
 //
 //	┌─ iosuite serve (this package) ─┐
-//	│   POST /upscale ────────┐      │
-//	│   GET  /health          │      │
-//	└─────────────────────────│──────┘
-//	                          ▼
-//	             ┌───────────────────────────┐
-//	             │ Provider (interface)      │
-//	             │   • LocalProvider         │ ← spawns real-esrgan-serve serve
-//	             │   • RunPodProvider (later)│
-//	             │   • RemoteProvider (later)│
-//	             └───────────────────────────┘
+//	│   POST /runsync ──────┐        │
+//	│   GET  /health        │        │
+//	└───────────────────────│────────┘
+//	                        ▼
+//	         ┌───────────────────────────┐
+//	         │ Provider (interface)      │
+//	         │   • LocalProvider         │ ← spawns real-esrgan-serve serve
+//	         │   • RunPodProvider        │ ← forwards JSON to api.runpod.ai
+//	         │   • RemoteProvider (later)│
+//	         └───────────────────────────┘
 //
-// Round 1 of iosuite serve ships LocalProvider only. The interface
-// keeps the HTTP layer clean of provider-specific knowledge so adding
-// the other two later doesn't churn the request path.
+// Wire shape (RunPod-compatible):
+//
+//	POST /runsync
+//	{"input": {
+//	    "images": [{"image_base64": "..."}, ...],
+//	    "output_format": "jpg" | "png",
+//	    "tile": true | false
+//	}}
+//
+//	→ {"status": "COMPLETED", "output": {
+//	    "outputs": [{"image_base64": "...", "exec_ms": ..., ...}],
+//	    "_diagnostics": {...}
+//	}}
+//
+// The `/upscale` path is kept as an alias of `/runsync` for callers
+// that prefer the more descriptive name.
 package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,22 +49,86 @@ import (
 	"time"
 )
 
-// Provider is what HandleUpscale routes to. Implementations own all
-// the provider-specific I/O (subprocess management, RunPod HTTP, etc.)
+// JobInput is the inner `input` field of a /runsync request. Mirrors
+// the shape real-esrgan-serve's RunPod handler accepts (`BatchPayload`
+// in providers/runpod/handler.py). Optional fields default at the
+// worker side; we just pass them through.
+type JobInput struct {
+	Images []ImageInput `json:"images,omitempty"`
+
+	// Legacy single-image fields. Not produced by current iosuite.io
+	// callers but accepted so a self-hoster pointing curl at the
+	// daemon can use the simpler shape.
+	ImageBase64 string `json:"image_base64,omitempty"`
+	ImageURL    string `json:"image_url,omitempty"`
+	ImagePath   string `json:"image_path,omitempty"`
+
+	OutputFormat  string `json:"output_format,omitempty"`
+	Tile          bool   `json:"tile,omitempty"`
+	DiscardOutput bool   `json:"discard_output,omitempty"`
+}
+
+// ImageInput is one entry of the `images` array.
+type ImageInput struct {
+	ImageBase64  string `json:"image_base64,omitempty"`
+	ImageURL     string `json:"image_url,omitempty"`
+	ImagePath    string `json:"image_path,omitempty"`
+	OutputFormat string `json:"output_format,omitempty"`
+	OutputPath   string `json:"output_path,omitempty"`
+}
+
+// JobRequest is the outer envelope POSTed to /runsync. Mirrors
+// RunPod's contract — the `input` field carries the actual job.
+type JobRequest struct {
+	Input JobInput `json:"input"`
+}
+
+// JobOutput is the inner result envelope. RunPod-shaped.
+type JobOutput struct {
+	Outputs     []ImageOutput   `json:"outputs"`
+	Model       string          `json:"model,omitempty"`
+	Diagnostics json.RawMessage `json:"_diagnostics,omitempty"`
+
+	// Legacy single-image fields surfaced when the request was a
+	// 1-element batch (back-compat with the pre-batched response
+	// shape).
+	ImageBase64      string `json:"image_base64,omitempty"`
+	OutputResolution string `json:"output_resolution,omitempty"`
+	InputResolution  string `json:"input_resolution,omitempty"`
+}
+
+// ImageOutput is one entry of `outputs[]`.
+type ImageOutput struct {
+	ImageBase64      string `json:"image_base64,omitempty"`
+	OutputPath       string `json:"output_path,omitempty"`
+	OutputSizeBytes  int64  `json:"output_size_bytes,omitempty"`
+	InputResolution  string `json:"input_resolution,omitempty"`
+	OutputResolution string `json:"output_resolution,omitempty"`
+	OutputFormat     string `json:"output_format,omitempty"`
+	ExecMS           int    `json:"exec_ms,omitempty"`
+}
+
+// JobResponse is the full /runsync envelope. `status` mirrors RunPod's
+// terminal states; the daemon always returns COMPLETED on success and
+// uses HTTP non-2xx for failures so callers can branch on either.
+type JobResponse struct {
+	Status string    `json:"status"`
+	Output JobOutput `json:"output"`
+}
+
+// Provider is what /runsync routes to. Implementations own all the
+// provider-specific I/O (subprocess management, RunPod HTTP, etc.)
 // so the HTTP layer stays trivial.
 type Provider interface {
 	// Start initializes the provider. For LocalProvider this spawns
-	// real-esrgan-serve serve and waits for it to be ready. The
-	// returned error is fatal — the daemon won't bind a listener if
-	// Start fails (no point answering requests we can't fulfil).
+	// real-esrgan-serve serve and waits for it to be ready. For
+	// RunPodProvider this probes the upstream /health.
 	Start(ctx context.Context) error
 
-	// Upscale runs one inference. Body is the multipart-or-binary
-	// upload from the HTTP client; contentType is its content-type
-	// header. Returns the upscaled image bytes + the content type to
-	// echo back. Implementations are responsible for any per-request
-	// concurrency limits — the HTTP layer gates nothing.
-	Upscale(ctx context.Context, body io.Reader, contentType string) (output []byte, outputType string, err error)
+	// Run executes one inference job. Returns the response envelope.
+	// The HTTP layer is responsible only for marshalling +
+	// status-code mapping; everything else is the provider's job.
+	Run(ctx context.Context, job JobRequest) (*JobResponse, error)
 
 	// Close tears the provider down. Must be safe to call multiple
 	// times. LocalProvider reaps its subprocess here.
@@ -65,16 +143,15 @@ type Options struct {
 	// off-the-wire).
 	Bind string
 
-	// Port for the daemon's HTTP listener. iosuite.io's compose talks
-	// to 8312 by convention; LocalProvider uses 8311 for the
+	// Port for the daemon's HTTP listener. iosuite.io's compose
+	// talks to 8312 by convention; LocalProvider uses 8311 for the
 	// subprocess so they don't collide.
 	Port int
 
-	// Provider is wired by the caller — round 1 only ships the local
-	// implementation but the interface is in place for runpod / serve
-	// later. The caller is responsible for calling Start() before
-	// Run() so the HTTP listener never opens before the backend is
-	// ready.
+	// Provider is wired by the caller — Phase 4 ships local + runpod
+	// implementations; remote follows. The caller is responsible for
+	// passing it in started state? No — Run calls Start so the
+	// listener never opens before the backend is ready.
 	Provider Provider
 }
 
@@ -99,7 +176,13 @@ func Run(ctx context.Context, opts Options) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/upscale", makeUpscaleHandler(opts.Provider))
+	jobHandler := makeJobHandler(opts.Provider)
+	// Both paths point at the same handler — `/runsync` is the
+	// RunPod-shaped name (which is what iosuite.io callers use for
+	// drop-in compatibility); `/upscale` is the human-friendly
+	// alias.
+	mux.HandleFunc("/runsync", jobHandler)
+	mux.HandleFunc("/upscale", jobHandler)
 
 	addr := fmt.Sprintf("%s:%d", opts.Bind, opts.Port)
 	srv := &http.Server{
@@ -108,9 +191,6 @@ func Run(ctx context.Context, opts Options) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Graceful shutdown on signals. Drain in-flight requests; kill
-	// hard after 30 s if the worker is wedged so the operator's
-	// docker stop never hangs forever.
 	signalCtx, cancel := signal.NotifyContext(ctx,
 		syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -134,33 +214,46 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
-func makeUpscaleHandler(p Provider) http.HandlerFunc {
+func makeJobHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
-		ct := r.Header.Get("Content-Type")
-		if ct == "" {
-			http.Error(w, "missing Content-Type", http.StatusBadRequest)
-			return
-		}
-
-		// Cap per-request body size at 25 MB. Multipart overhead +
-		// max upload (15 MB) + room for batched submissions; matches
-		// what real-esrgan-serve's handler accepts on the request
-		// side. r.Body is wrapped with MaxBytesReader so the provider
-		// reads from a bounded stream — no DoS via huge upload.
+		// Cap inbound JSON body. 25 MB is plenty for a 4-image batch
+		// at ~5 MB raw + base64 overhead — same envelope the
+		// real-esrgan-serve worker accepts on the wire.
 		const maxBody = 25 * 1024 * 1024
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
-		out, outType, err := p.Upscale(r.Context(), r.Body, ct)
+		var req JobRequest
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("decode JSON: %v", err), http.StatusBadRequest)
+			return
+		}
+		// Normalise legacy single-image input into the array form so
+		// providers only deal with one shape downstream.
+		if len(req.Input.Images) == 0 {
+			if req.Input.ImageBase64 != "" || req.Input.ImageURL != "" || req.Input.ImagePath != "" {
+				req.Input.Images = []ImageInput{{
+					ImageBase64: req.Input.ImageBase64,
+					ImageURL:    req.Input.ImageURL,
+					ImagePath:   req.Input.ImagePath,
+				}}
+				req.Input.ImageBase64 = ""
+				req.Input.ImageURL = ""
+				req.Input.ImagePath = ""
+			}
+		}
+		if len(req.Input.Images) == 0 {
+			http.Error(w, `request needs "input.images" (array) or one of input.image_base64/url/path`, http.StatusBadRequest)
+			return
+		}
+
+		resp, err := p.Run(r.Context(), req)
 		if err != nil {
-			// Distinguish bad requests from upstream failures by the
-			// error type. ProviderError is what implementations
-			// return when the BACKEND is unhealthy (worth a 502);
-			// everything else (decode failure, oversize) is on the
-			// caller (502 → 400/422).
 			var perr *ProviderError
 			if errors.As(err, &perr) {
 				http.Error(w, perr.Error(), http.StatusBadGateway)
@@ -169,8 +262,8 @@ func makeUpscaleHandler(p Provider) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", outType)
-		_, _ = w.Write(out)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }
 
@@ -186,8 +279,7 @@ func (e *ProviderError) Error() string { return "provider: " + e.Underlying.Erro
 func (e *ProviderError) Unwrap() error { return e.Underlying }
 
 // AsProviderError wraps any error with ProviderError so the HTTP
-// layer renders it as 502. Provider implementations call this when
-// the backend (subprocess, RunPod, remote) returned a failure.
+// layer renders it as 502.
 func AsProviderError(err error) error {
 	if err == nil {
 		return nil

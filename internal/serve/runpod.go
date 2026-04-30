@@ -1,27 +1,24 @@
 // RunPodProvider — `iosuite serve --provider runpod` backend.
 //
-// Translates the daemon's HTTP surface (multipart `image` field upload)
-// to RunPod's serverless API shape (JSON with base64-encoded images),
-// posts to /runsync, falls back to polling /status when /runsync hits
-// its 90 s server-side timeout, and returns the upscaled bytes.
+// Forwards the daemon's JobRequest to RunPod's serverless API
+// (/runsync, falling back to /run + /status polling on cold start)
+// and parses the response. The wire shape on iosuite serve's side
+// matches RunPod's exactly, so the provider is mostly transport —
+// add auth, post, parse, return.
 //
-// Same flow iosuite.io's backend uses today via direct RunPod calls;
-// folding it behind the Provider interface lets self-hosters point a
-// LOCAL `iosuite serve` at a CLOUD RunPod endpoint without any client
-// code change. iosuite.io can do the same swap in Phase 4 by pointing
-// its existing client at a `iosuite serve --provider runpod` daemon.
+// iosuite.io's `submit_upscale_batch` already sends RunPod-shaped
+// JSON; pointing it at `iosuite serve --provider runpod` is a one-line
+// URL swap. Self-hosters get the same benefit when they want to
+// route a local app through cloud GPU without touching client code.
 package serve
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -36,28 +33,14 @@ type RunPodProviderOptions struct {
 	// APIKey authenticates with RunPod. Required.
 	APIKey string
 
-	// SyncTimeout is how long /runsync waits before falling back to
+	// SyncTimeout — how long /runsync waits before falling back to
 	// /run + /status polling. RunPod's server-side cap is 90 s; we
-	// match. Caller may bump for batch jobs; default is 120 to give
-	// our own client a few seconds beyond RunPod's timeout to read
-	// the still-running response and switch to polling cleanly.
+	// give our own client 30 s of headroom.
 	SyncTimeout time.Duration
 
-	// PollMax is the longest we wait via /status polling before
-	// giving up. Should be larger than typical cold-start +
-	// inference time for the GPU class on the endpoint. Default
-	// 300 s matches iosuite.io's backend.
+	// PollMax — longest we poll /status before giving up. Default
+	// 300 s mirrors iosuite.io's backend.
 	PollMax time.Duration
-
-	// OutputFormat — "jpg" or "png". Defaults to "jpg" because the
-	// resulting payloads are 5-10× smaller than PNG and the typical
-	// caller is downstream resizing anyway.
-	OutputFormat string
-
-	// Tile, when true, sends `tile: true` in the RunPod request so
-	// inputs > 1280² get the slice/blend path. Safe to leave on
-	// always — sub-1280² inputs short-circuit through the worker.
-	Tile bool
 }
 
 // RunPodProvider implements Provider against a RunPod endpoint.
@@ -77,9 +60,6 @@ func NewRunPod(opts RunPodProviderOptions) *RunPodProvider {
 	if opts.PollMax == 0 {
 		opts.PollMax = 300 * time.Second
 	}
-	if opts.OutputFormat == "" {
-		opts.OutputFormat = "jpg"
-	}
 	return &RunPodProvider{
 		opts: opts,
 		http: &http.Client{Timeout: opts.SyncTimeout + 30*time.Second},
@@ -87,10 +67,9 @@ func NewRunPod(opts RunPodProviderOptions) *RunPodProvider {
 }
 
 // Start validates configuration and confirms the endpoint exists by
-// hitting RunPod's per-endpoint /health. The probe is cheap and
-// catches misconfigured endpoint IDs before we accept user traffic
-// (otherwise the first inbound request would 502 with a confusing
-// runpod-side message).
+// hitting RunPod's per-endpoint /health. Catches misconfigured
+// endpoint IDs before we accept user traffic — otherwise the first
+// inbound request would 502 with a confusing runpod-side message.
 func (r *RunPodProvider) Start(ctx context.Context) error {
 	if r.opts.EndpointID == "" {
 		return errors.New("RunPodProvider: EndpointID is required")
@@ -120,67 +99,50 @@ func (r *RunPodProvider) Start(ctx context.Context) error {
 	return fmt.Errorf("runpod /health: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
-// Upscale extracts the multipart `image` field, base64-encodes it,
-// posts to RunPod, and returns the upscaled bytes + content-type.
-// /runsync first; /run + /status polling fallback if the queue is
-// cold. Mirrors iosuite.io's backend submit_upscale_batch one-to-one.
-func (r *RunPodProvider) Upscale(ctx context.Context, body io.Reader, contentType string) ([]byte, string, error) {
-	imgBytes, err := extractImageField(body, contentType)
+// Run forwards the JobRequest to RunPod /runsync and returns the
+// response. The request shape iosuite serve received matches what
+// RunPod's worker expects, so nothing to translate.
+func (r *RunPodProvider) Run(ctx context.Context, job JobRequest) (*JobResponse, error) {
+	bodyJSON, err := json.Marshal(job)
 	if err != nil {
-		// Caller-side decode error — return as a regular error so
-		// the HTTP layer maps to 500 (a 400 would also work; the
-		// `image` field being absent is genuinely the caller's
-		// fault, not the provider's).
-		return nil, "", err
-	}
-
-	payload := map[string]any{
-		"input": map[string]any{
-			"images":          []map[string]any{{"image_base64": base64.StdEncoding.EncodeToString(imgBytes)}},
-			"output_format":   r.opts.OutputFormat,
-			"tile":            r.opts.Tile,
-			"discard_output":  false,
-		},
-	}
-	bodyJSON, err := json.Marshal(payload)
-	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	syncURL := fmt.Sprintf("%s/%s/runsync", runpodBase, r.opts.EndpointID)
 	resp, err := r.post(ctx, syncURL, bodyJSON)
 	if err != nil {
-		return nil, "", AsProviderError(err)
+		return nil, AsProviderError(err)
 	}
-	if status, _ := resp["status"].(string); status == "IN_QUEUE" || status == "IN_PROGRESS" {
-		jobID, _ := resp["id"].(string)
+	if resp.Status == "IN_QUEUE" || resp.Status == "IN_PROGRESS" {
+		jobID := resp.ID
 		if jobID == "" {
-			return nil, "", AsProviderError(fmt.Errorf("runpod %s but no job id in response", status))
+			return nil, AsProviderError(fmt.Errorf("runpod %s but no job id in response", resp.Status))
 		}
 		resp, err = r.pollUntilDone(ctx, jobID)
 		if err != nil {
-			return nil, "", AsProviderError(err)
+			return nil, AsProviderError(err)
 		}
 	}
-	return decodeRunPodResponse(resp, r.opts.OutputFormat)
+	if resp.Status != "COMPLETED" {
+		return nil, AsProviderError(fmt.Errorf("runpod terminal status: %s", resp.Status))
+	}
+	return &JobResponse{Status: "COMPLETED", Output: resp.Output}, nil
 }
 
+// Close — RunPodProvider holds no long-lived resources beyond the
+// http.Client (which is GC'd).
 func (r *RunPodProvider) Close() error { return nil }
 
-// truncate caps a string for inclusion in error messages — keeps
-// runpod's HTML 502 pages from ending up in the daemon's logs at
-// full length when the upstream is misbehaving.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+// runPodEnvelope is the loosely-typed envelope RunPod returns from
+// /runsync and /status. It carries a `status` field, an `id` (only on
+// /runsync responses that hit IN_QUEUE), and the worker's `output`.
+type runPodEnvelope struct {
+	Status string    `json:"status"`
+	ID     string    `json:"id,omitempty"`
+	Output JobOutput `json:"output"`
 }
 
-// post sends a JSON body to RunPod and returns the parsed response
-// envelope. Splits the auth + JSON-roundtrip out so /runsync and
-// /status share the same error handling.
-func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) (map[string]any, error) {
+func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) (*runPodEnvelope, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -199,14 +161,14 @@ func (r *RunPodProvider) post(ctx context.Context, url string, body []byte) (map
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("runpod %s: HTTP %d: %s", url, resp.StatusCode, truncate(string(respBody), 300))
 	}
-	var out map[string]any
-	if err := json.Unmarshal(respBody, &out); err != nil {
+	var env runPodEnvelope
+	if err := json.Unmarshal(respBody, &env); err != nil {
 		return nil, fmt.Errorf("runpod %s: parse: %w", url, err)
 	}
-	return out, nil
+	return &env, nil
 }
 
-func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (map[string]any, error) {
+func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (*runPodEnvelope, error) {
 	statusURL := fmt.Sprintf("%s/%s/status/%s", runpodBase, r.opts.EndpointID, jobID)
 	deadline := time.Now().Add(r.opts.PollMax)
 	tick := time.NewTicker(2 * time.Second)
@@ -223,15 +185,15 @@ func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (map[s
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("runpod /status: HTTP %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 		}
-		var out map[string]any
-		if err := json.Unmarshal(respBody, &out); err != nil {
+		var env runPodEnvelope
+		if err := json.Unmarshal(respBody, &env); err != nil {
 			return nil, fmt.Errorf("runpod /status: parse: %w", err)
 		}
-		switch out["status"] {
+		switch env.Status {
 		case "COMPLETED":
-			return out, nil
+			return &env, nil
 		case "FAILED", "CANCELLED", "TIMED_OUT":
-			return nil, fmt.Errorf("runpod job %s: %v", jobID, out["status"])
+			return nil, fmt.Errorf("runpod job %s: %s", jobID, env.Status)
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("runpod job %s still running after %s", jobID, r.opts.PollMax)
@@ -244,79 +206,10 @@ func (r *RunPodProvider) pollUntilDone(ctx context.Context, jobID string) (map[s
 	}
 }
 
-// extractImageField walks the multipart body and returns the bytes of
-// the first part named `image` (the contract real-esrgan-serve serve
-// also follows). Caller passes the original Content-Type header so
-// we can pull the boundary parameter out of it.
-func extractImageField(body io.Reader, contentType string) ([]byte, error) {
-	_, params, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return nil, fmt.Errorf("parse content-type: %w", err)
+// truncate caps a string for inclusion in error messages.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	boundary := params["boundary"]
-	if boundary == "" {
-		return nil, errors.New("multipart Content-Type missing boundary")
-	}
-	mr := multipart.NewReader(body, boundary)
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			return nil, errors.New(`multipart body has no "image" field`)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read multipart: %w", err)
-		}
-		if part.FormName() == "image" {
-			data, err := io.ReadAll(part)
-			part.Close()
-			if err != nil {
-				return nil, fmt.Errorf("read image part: %w", err)
-			}
-			return data, nil
-		}
-		part.Close()
-	}
-}
-
-// decodeRunPodResponse pulls the upscaled bytes out of a RunPod
-// COMPLETED envelope. The worker returns:
-//
-//	{"output": {"outputs": [{"image_base64": "...", ...}], "_diagnostics": {...}}}
-//
-// We grab the first output's image_base64 and decode it. If
-// _diagnostics.per_item_errors is non-empty, the worker rejected the
-// input — surface that as a provider error.
-func decodeRunPodResponse(resp map[string]any, outputFormat string) ([]byte, string, error) {
-	output, ok := resp["output"].(map[string]any)
-	if !ok {
-		return nil, "", AsProviderError(fmt.Errorf("runpod response missing `output` field"))
-	}
-	if diag, ok := output["_diagnostics"].(map[string]any); ok {
-		if errs, _ := diag["per_item_errors"].([]any); len(errs) > 0 {
-			first, _ := errs[0].(map[string]any)
-			msg, _ := first["error"].(string)
-			return nil, "", AsProviderError(fmt.Errorf("worker error: %s", msg))
-		}
-	}
-	outputs, ok := output["outputs"].([]any)
-	if !ok || len(outputs) == 0 {
-		return nil, "", AsProviderError(fmt.Errorf("runpod response missing `outputs[]`"))
-	}
-	first, ok := outputs[0].(map[string]any)
-	if !ok {
-		return nil, "", AsProviderError(fmt.Errorf("runpod outputs[0] is not an object"))
-	}
-	b64, _ := first["image_base64"].(string)
-	if b64 == "" {
-		return nil, "", AsProviderError(fmt.Errorf("runpod outputs[0] missing image_base64"))
-	}
-	imgBytes, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return nil, "", AsProviderError(fmt.Errorf("decode image_base64: %w", err))
-	}
-	contentType := "image/jpeg"
-	if outputFormat == "png" {
-		contentType = "image/png"
-	}
-	return imgBytes, contentType, nil
+	return s[:n] + "…"
 }

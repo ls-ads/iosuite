@@ -1,27 +1,28 @@
 // LocalProvider — `iosuite serve --provider local` backend.
 //
 // Manages a long-lived `real-esrgan-serve serve` subprocess on a
-// loopback port and proxies HTTP /upscale requests to it. The wrapped
-// daemon does the actual GPU work (warm ORT/TRT session, the same
-// thing iosuite.io's backend uses today via RunPod). iosuite serve
-// just re-exposes that on a stable, authentication-friendly endpoint.
+// loopback port and translates the daemon's JSON JobRequest into the
+// multipart calls real-esrgan-serve serve expects (one HTTP call per
+// image in the batch). The wrapped daemon does the actual GPU work
+// (warm ORT/TRT session, the same thing iosuite.io's backend uses
+// today via RunPod). iosuite serve just re-exposes that on a stable,
+// authentication-friendly endpoint.
 //
-// Why wrap it instead of forwarding directly:
-//   - Stable HTTP shape regardless of backend (round 2 adds runpod /
-//     remote providers that look identical from the client's side).
-//   - Provider abstraction means iosuite.io can deploy a single
-//     `iosuite serve` and decide local-vs-cloud via flag, not by
-//     swapping endpoints in the FastAPI config.
-//   - Adding cross-cutting concerns (rate-limit, auth, telemetry) goes
-//     here once, not per-provider.
+// Single-image-per-call, no tile mode: real-esrgan-serve serve's HTTP
+// surface is single-shot multipart with no tile flag. Tile-mode
+// uploads (>1280²) need to go through `--provider runpod`, where the
+// worker handler accepts the batched JSON shape natively. Documented
+// in iosuite's ARCHITECTURE.md.
 package serve
 
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -33,8 +34,7 @@ import (
 // LocalProviderOptions configures the wrapped subprocess.
 type LocalProviderOptions struct {
 	// Bin is the absolute path to the real-esrgan-serve binary.
-	// Caller (cobra layer) resolves this via internal/runtime so the
-	// provider doesn't need to know about PATH search.
+	// Caller (cobra layer) resolves this via internal/runtime.
 	Bin string
 
 	// SubprocessPort is the loopback port real-esrgan-serve serve
@@ -51,7 +51,8 @@ type LocalProviderOptions struct {
 }
 
 // LocalProvider implements Provider by spawning a real-esrgan-serve
-// serve subprocess and reverse-proxying HTTP traffic to it.
+// serve subprocess and translating Run() requests into one or more
+// HTTP calls against it.
 type LocalProvider struct {
 	opts LocalProviderOptions
 
@@ -59,20 +60,16 @@ type LocalProvider struct {
 	subURL     string
 	httpClient *http.Client
 
-	// exited is closed when cmd.Wait() returns. waitHealthy selects
-	// on it so a subprocess that dies during startup (e.g. missing
-	// upscaler.py, missing CUDA libs) surfaces as a fast error
-	// instead of "did not return 200 within 120 s".
-	exited chan struct{}
+	// exited is closed when cmd.Wait() returns. Lets waitHealthy
+	// fail fast on a crashed startup instead of polling for 120 s.
+	exited  chan struct{}
 	waitErr error
 
 	closeOnce sync.Once
 }
 
 // NewLocal returns a configured LocalProvider. Doesn't spawn the
-// subprocess yet — call Start() for that. Splitting init from start
-// makes wiring easier in main() (build the provider, then pass to
-// serve.Run which calls Start).
+// subprocess yet — call Start() for that.
 func NewLocal(opts LocalProviderOptions) *LocalProvider {
 	if opts.SubprocessPort == 0 {
 		opts.SubprocessPort = 8311
@@ -89,8 +86,7 @@ func NewLocal(opts LocalProviderOptions) *LocalProvider {
 
 // Start spawns real-esrgan-serve serve and polls /health until it's
 // ready or the context expires. Returns an error if spawn fails or
-// if the subprocess never becomes healthy — Run treats this as fatal
-// and won't open the public listener.
+// if the subprocess never becomes healthy.
 func (l *LocalProvider) Start(ctx context.Context) error {
 	if l.opts.Bin == "" {
 		return errors.New("LocalProvider: Bin must be set (resolve via internal/runtime first)")
@@ -104,8 +100,6 @@ func (l *LocalProvider) Start(ctx context.Context) error {
 		"--gpu-id", strconv.Itoa(l.opts.GPUID),
 	}
 	cmd := exec.Command(l.opts.Bin, args...)
-	// Stream the helper's stderr through ours so engine warm-up
-	// progress and errors show up in the daemon's logs immediately.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -118,17 +112,9 @@ func (l *LocalProvider) Start(ctx context.Context) error {
 		close(l.exited)
 	}()
 
-	// Wait for /health. Cold engine load can take 5–60 s on TRT;
-	// 120 s ceiling matches the cold-start budget the iosuite.io
-	// backend already plans around. waitHealthy also detects
-	// subprocess exit (closes l.exited) so a crashed startup
-	// surfaces in seconds, not 120 s.
 	healthCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	if err := l.waitHealthy(healthCtx); err != nil {
-		// Health never came up. If the subprocess hasn't exited yet
-		// (still alive but not responding), kill it so we don't
-		// leave an orphan when Run errors.
 		select {
 		case <-l.exited:
 			// already gone
@@ -146,8 +132,6 @@ func (l *LocalProvider) waitHealthy(ctx context.Context) error {
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		// One attempt before the first tick so a fast subprocess
-		// start (warm cache) doesn't pay an unnecessary 500 ms wait.
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := l.httpClient.Do(req)
 		if err == nil {
@@ -158,10 +142,6 @@ func (l *LocalProvider) waitHealthy(ctx context.Context) error {
 		}
 		select {
 		case <-l.exited:
-			// Subprocess died before health came up — surface the
-			// wait() error (typically the exit code + a short
-			// reason). Saves the operator 120 s of polling on a
-			// configuration error like missing upscaler.py.
 			if l.waitErr != nil {
 				return fmt.Errorf("subprocess exited during startup: %w", l.waitErr)
 			}
@@ -173,76 +153,92 @@ func (l *LocalProvider) waitHealthy(ctx context.Context) error {
 	}
 }
 
-// Upscale forwards the request to the wrapped subprocess. The body
-// is forwarded as-is (multipart with `image` field, matching
-// real-esrgan-serve's contract). Returns the raw output bytes +
-// content-type header from the subprocess response.
-func (l *LocalProvider) Upscale(ctx context.Context, body io.Reader, contentType string) ([]byte, string, error) {
-	// Buffer the request body. The subprocess expects
-	// `multipart/form-data` with an `image` field; the caller
-	// (iosuite serve's HTTP handler) hands us the raw inbound stream
-	// which is the same shape real-esrgan-serve already accepts —
-	// so we forward unchanged. Buffering means we can retry once on
-	// transient subprocess errors (round 2 enhancement); for now it
-	// just simplifies the http.Request construction.
-	buf, err := io.ReadAll(body)
+// Run translates the JobRequest into N single-image HTTP calls
+// against the wrapped subprocess and aggregates the results into a
+// JobResponse. real-esrgan-serve serve's HTTP API is single-shot per
+// request (one multipart upload, one image back), so a multi-image
+// JobRequest fans out into N calls.
+//
+// LocalProvider does NOT honor tile=true — real-esrgan-serve serve's
+// HTTP path doesn't accept it. Callers that need tiling should use
+// `iosuite serve --provider runpod` instead.
+func (l *LocalProvider) Run(ctx context.Context, job JobRequest) (*JobResponse, error) {
+	if len(job.Input.Images) == 0 {
+		return nil, errors.New("Run: no images in request")
+	}
+	outputs := make([]ImageOutput, 0, len(job.Input.Images))
+	for i, img := range job.Input.Images {
+		raw, err := decodeImageInput(img)
+		if err != nil {
+			return nil, fmt.Errorf("image %d: %w", i, err)
+		}
+		t0 := time.Now()
+		outBytes, err := l.upscaleOne(ctx, raw)
+		execMS := int(time.Since(t0).Milliseconds())
+		if err != nil {
+			return nil, AsProviderError(fmt.Errorf("upscale image %d: %w", i, err))
+		}
+		outputs = append(outputs, ImageOutput{
+			ImageBase64:  base64.StdEncoding.EncodeToString(outBytes),
+			OutputFormat: defaultStr(img.OutputFormat, defaultStr(job.Input.OutputFormat, "jpg")),
+			ExecMS:       execMS,
+		})
+	}
+	return &JobResponse{
+		Status: "COMPLETED",
+		Output: JobOutput{Outputs: outputs},
+	}, nil
+}
+
+// upscaleOne does ONE multipart POST to the wrapped subprocess.
+// Returns the raw image bytes from the response body.
+func (l *LocalProvider) upscaleOne(ctx context.Context, imgBytes []byte) ([]byte, error) {
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	part, err := mw.CreateFormFile("image", "input.bin")
 	if err != nil {
-		return nil, "", fmt.Errorf("read inbound body: %w", err)
+		return nil, err
+	}
+	if _, err := part.Write(imgBytes); err != nil {
+		return nil, err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		l.subURL+"/upscale", bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.subURL+"/upscale", body)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Connection", "close") // see proxy.ts in iosuite.io frontend for the same pattern
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Connection", "close") // see iosuite.io frontend proxy.ts
 
 	resp, err := l.httpClient.Do(req)
 	if err != nil {
-		// Network-level failure to the subprocess → backend unhealthy.
-		// Wrap as ProviderError so the HTTP layer maps to 502.
-		return nil, "", AsProviderError(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
-
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", AsProviderError(fmt.Errorf("read subprocess response: %w", err))
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		// Subprocess returned 4xx/5xx — surface its body so the
-		// caller sees the actual diagnostic. Wrap as ProviderError
-		// so 502 propagates upstream.
-		return nil, "", AsProviderError(fmt.Errorf(
-			"subprocess returned %d: %s", resp.StatusCode, string(respBody)))
+		return nil, fmt.Errorf("subprocess returned %d: %s", resp.StatusCode, string(respBody))
 	}
-	outType := resp.Header.Get("Content-Type")
-	if outType == "" {
-		outType = "application/octet-stream"
-	}
-	return respBody, outType, nil
+	return respBody, nil
 }
 
-// Close stops the subprocess. Safe to call multiple times. Idempotent
-// against a subprocess that already exited on its own (e.g. crashed
-// during Start) — the exited channel disambiguates.
+// Close stops the subprocess. Safe to call multiple times.
 func (l *LocalProvider) Close() error {
 	l.closeOnce.Do(func() {
 		if l.cmd == nil || l.cmd.Process == nil {
 			return
 		}
-		// Already exited (crash during startup, or operator killed
-		// it externally) — nothing to do, the wait goroutine has
-		// already collected the status into waitErr.
 		select {
 		case <-l.exited:
 			return
 		default:
 		}
-		// Try a graceful shutdown first; SIGKILL after 5 s if it's
-		// still alive. Same pattern real-esrgan-serve's helperProc
-		// uses internally.
 		_ = l.cmd.Process.Signal(os.Interrupt)
 		select {
 		case <-l.exited:
@@ -252,4 +248,48 @@ func (l *LocalProvider) Close() error {
 		}
 	})
 	return l.waitErr
+}
+
+// decodeImageInput pulls the image bytes out of an ImageInput. Only
+// image_base64 is supported in this round; image_url and image_path
+// would require fetching them, which is the runpod handler's job
+// (upstream services like requests.get + workspace mount). Local
+// callers can base64-encode upfront.
+func decodeImageInput(img ImageInput) ([]byte, error) {
+	if img.ImageBase64 != "" {
+		// Strip a `data:image/png;base64,` prefix if present.
+		s := img.ImageBase64
+		if idx := indexByte(s, ','); idx >= 0 && hasPrefix(s, "data:") {
+			s = s[idx+1:]
+		}
+		raw, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return nil, fmt.Errorf("decode image_base64: %w", err)
+		}
+		return raw, nil
+	}
+	if img.ImageURL != "" || img.ImagePath != "" {
+		return nil, errors.New("image_url and image_path are only supported with --provider runpod (the worker handler fetches them); use image_base64 with --provider local")
+	}
+	return nil, errors.New("image input is empty")
+}
+
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+func defaultStr(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
