@@ -177,6 +177,10 @@ func cmdServe(args []string) error {
 		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU)")
 		runtimeBin = fs.String("runtime", "", "Override path to the real-esrgan-serve binary (local provider only)")
 		subPort    = fs.Int("subprocess-port", 8311, "Loopback port for the wrapped real-esrgan-serve serve (local provider only)")
+		// RunPod provider flags
+		endpointID   = fs.String("endpoint-id", "", "RunPod endpoint id (runpod provider only)")
+		runpodAPIKey = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+		tile         = fs.Bool("tile", true, "Enable worker-side tiling for inputs >1280² (runpod provider only)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), `Usage: iosuite serve [flags]
@@ -226,8 +230,33 @@ Flags:`)
 			Port:     *port,
 			Provider: local,
 		})
-	case "runpod", "serve":
-		return fmt.Errorf("provider %q is planned but not yet implemented; use --provider local", prov)
+	case "runpod":
+		eid := *endpointID
+		if eid == "" {
+			eid = cfg.RunpodEndpointID
+		}
+		if eid == "" {
+			eid = os.Getenv("RUNPOD_ENDPOINT_ID")
+		}
+		if eid == "" {
+			return fmt.Errorf("runpod provider requires --endpoint-id (or RUNPOD_ENDPOINT_ID env, or [runpod] endpoint_id in config)")
+		}
+		key := resolveRunpodAPIKey(*runpodAPIKey, cfg)
+		if key == "" {
+			return fmt.Errorf("runpod provider requires API key (--runpod-api-key, RUNPOD_API_KEY env, or [runpod] api_key in config)")
+		}
+		rp := serve.NewRunPod(serve.RunPodProviderOptions{
+			EndpointID: eid,
+			APIKey:     key,
+			Tile:       *tile,
+		})
+		return serve.Run(context.Background(), serve.Options{
+			Bind:     *bind,
+			Port:     *port,
+			Provider: rp,
+		})
+	case "serve":
+		return fmt.Errorf("provider %q is planned but not yet implemented; use --provider local or --provider runpod", prov)
 	default:
 		return fmt.Errorf("unknown provider %q (expected local | runpod | serve)", prov)
 	}
