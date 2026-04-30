@@ -58,7 +58,12 @@ func NewRunPod(opts RunPodProviderOptions) *RunPodProvider {
 		opts.SyncTimeout = 120 * time.Second
 	}
 	if opts.PollMax == 0 {
-		opts.PollMax = 300 * time.Second
+		// 10 minutes. Covers a cold-start (~45 s) plus a tile-mode 4K
+		// upscale (~90 s on rtx-4090) plus enough buffer for queue
+		// time when other tenants are warming the same host pool.
+		// iosuite.io's pre-Phase-4 client cap was 7.3 min; we sit
+		// comfortably above it so the bottleneck is RunPod, not us.
+		opts.PollMax = 10 * time.Minute
 	}
 	return &RunPodProvider{
 		opts: opts,
@@ -108,11 +113,15 @@ func (r *RunPodProvider) Run(ctx context.Context, job JobRequest) (*JobResponse,
 		return nil, err
 	}
 
+	start := time.Now()
 	syncURL := fmt.Sprintf("%s/%s/runsync", runpodBase, r.opts.EndpointID)
+	logf("runpod.runsync.post images=%d bytes=%d", len(job.Input.Images), len(bodyJSON))
 	resp, err := r.post(ctx, syncURL, bodyJSON)
 	if err != nil {
+		logf("runpod.runsync.err err=%q dur=%s", err.Error(), time.Since(start))
 		return nil, AsProviderError(err)
 	}
+	logf("runpod.runsync.resp status=%s id=%s dur=%s", resp.Status, resp.ID, time.Since(start))
 	if resp.Status == "IN_QUEUE" || resp.Status == "IN_PROGRESS" {
 		jobID := resp.ID
 		if jobID == "" {
@@ -120,8 +129,10 @@ func (r *RunPodProvider) Run(ctx context.Context, job JobRequest) (*JobResponse,
 		}
 		resp, err = r.pollUntilDone(ctx, jobID)
 		if err != nil {
+			logf("runpod.poll.err job=%s err=%q dur=%s", jobID, err.Error(), time.Since(start))
 			return nil, AsProviderError(err)
 		}
+		logf("runpod.poll.done job=%s status=%s dur=%s", jobID, resp.Status, time.Since(start))
 	}
 	if resp.Status != "COMPLETED" {
 		return nil, AsProviderError(fmt.Errorf("runpod terminal status: %s", resp.Status))

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"iosuite.io/internal/config"
 	"iosuite.io/internal/doctor"
@@ -181,6 +182,11 @@ func cmdServe(args []string) error {
 		endpointID   = fs.String("endpoint-id", "", "RunPod endpoint id (runpod provider only)")
 		runpodAPIKey = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
 		tile         = fs.Bool("tile", true, "Enable worker-side tiling for inputs >1280² (runpod provider only)")
+		// PollMax — how long the daemon waits on a single RunPod job
+		// before giving up. 10m default; bump for slow / cold-prone
+		// endpoints. Falls back to IOSUITE_POLL_MAX env when the flag
+		// isn't passed (matches RUNPOD_API_KEY's resolution pattern).
+		pollMax = fs.Duration("poll-max", 0, "Max wait per upstream job, e.g. 10m (default 10m, env IOSUITE_POLL_MAX)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), `Usage: iosuite serve [flags]
@@ -250,9 +256,20 @@ Flags:`)
 		// --tile flag is kept for compat but no longer applies at
 		// daemon level; document accordingly.
 		_ = *tile
+		pm := *pollMax
+		if pm == 0 {
+			if env := os.Getenv("IOSUITE_POLL_MAX"); env != "" {
+				parsed, err := time.ParseDuration(env)
+				if err != nil {
+					return fmt.Errorf("invalid IOSUITE_POLL_MAX %q: %w", env, err)
+				}
+				pm = parsed
+			}
+		}
 		rp := serve.NewRunPod(serve.RunPodProviderOptions{
 			EndpointID: eid,
 			APIKey:     key,
+			PollMax:    pm,
 		})
 		return serve.Run(context.Background(), serve.Options{
 			Bind:     *bind,

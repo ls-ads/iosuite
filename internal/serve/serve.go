@@ -39,6 +39,8 @@ package serve
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -226,10 +228,21 @@ func makeJobHandler(p Provider) http.HandlerFunc {
 		const maxBody = 25 * 1024 * 1024
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 
+		// Per-request id + log prefix. With no logging today, a hung
+		// upstream is a black box — caller sees a 5xx after minutes,
+		// daemon shows nothing. The id lets us correlate with
+		// iosuite-api's structured logs when something goes wrong.
+		reqID := newReqID()
+		start := time.Now()
+		path := r.URL.Path
+		clen := r.ContentLength
+		logf("req.start id=%s path=%s bytes=%d remote=%s", reqID, path, clen, r.RemoteAddr)
+
 		var req JobRequest
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
+			logf("req.bad_json id=%s err=%q dur=%s", reqID, err.Error(), time.Since(start))
 			http.Error(w, fmt.Sprintf("decode JSON: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -248,23 +261,50 @@ func makeJobHandler(p Provider) http.HandlerFunc {
 			}
 		}
 		if len(req.Input.Images) == 0 {
+			logf("req.empty_images id=%s dur=%s", reqID, time.Since(start))
 			http.Error(w, `request needs "input.images" (array) or one of input.image_base64/url/path`, http.StatusBadRequest)
 			return
 		}
+		logf("req.dispatch id=%s images=%d tile=%t fmt=%s discard=%t",
+			reqID, len(req.Input.Images), req.Input.Tile, req.Input.OutputFormat, req.Input.DiscardOutput)
 
 		resp, err := p.Run(r.Context(), req)
 		if err != nil {
 			var perr *ProviderError
 			if errors.As(err, &perr) {
+				logf("req.provider_err id=%s err=%q dur=%s", reqID, perr.Error(), time.Since(start))
 				http.Error(w, perr.Error(), http.StatusBadGateway)
 				return
 			}
+			logf("req.internal_err id=%s err=%q dur=%s", reqID, err.Error(), time.Since(start))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		logf("req.ok id=%s outputs=%d dur=%s", reqID, len(resp.Output.Outputs), time.Since(start))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// logf — single-line, space-separated key=value to stderr. Loki's
+// promtail picks it up directly; humans grep it. Keeping the format
+// simple on purpose — JSON would force everything (including the
+// quoted err strings) through proper escaping for one consumer that
+// could just as easily parse this.
+func logf(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, time.Now().UTC().Format("2006-01-02T15:04:05.000Z")+" "+format+"\n", args...)
+}
+
+// newReqID — 8-byte random id, hex-encoded. Short enough to grep,
+// large enough not to collide across an hour of traffic.
+func newReqID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand never errs on Linux post-init; fall back to a
+		// timestamp string so the surface stays valid.
+		return fmt.Sprintf("ts%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // ProviderError marks "the backend is unhealthy / failed our request"
