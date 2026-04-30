@@ -1,46 +1,33 @@
-.PHONY: build build-cli build-lib clean all test build-all
+.PHONY: build clean fmt vet test install
 
-BIN_DIR=bin
-TOOLS_DIR=tools
-LIBS_DIR=libs
+BIN_DIR ?= bin
+VERSION ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-platforms := linux windows darwin
-architectures := amd64 arm64
+LDFLAGS = -s -w \
+          -X iosuite.io/internal/version.Version=$(VERSION) \
+          -X iosuite.io/internal/version.Commit=$(COMMIT)
 
-all: build
-
-build: build-cli build-lib
-
-build-cli:
+# Pure-Go build. CGO=0 is the whole point — the legacy CLI shipped a
+# CGO bridge to a C++ inference lib that broke cross-compilation. The
+# new shape subprocesses real-esrgan-serve, so the iosuite binary
+# itself has no native dependencies.
+build:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/ioimg ./$(TOOLS_DIR)/ioimg
-	go build -o $(BIN_DIR)/iovid ./$(TOOLS_DIR)/iovid
-	@# Also update arch-specific binaries for local dev convenience
-	cp $(BIN_DIR)/ioimg $(BIN_DIR)/ioimg-linux-amd64
-	cp $(BIN_DIR)/iovid $(BIN_DIR)/iovid-linux-amd64
-
-build-lib:
-	@mkdir -p $(BIN_DIR)
-	go build -buildmode=c-shared -o $(BIN_DIR)/libiocore.so ./$(LIBS_DIR)/iocore/bridge/main.go
-
-build-all: $(foreach p,$(platforms),$(foreach a,$(architectures),build-ioimg-$(p)-$(a) build-iovid-$(p)-$(a)))
-
-# Template for dynamic binary target generation
-define BUILD_BINARY_TARGET
-build-$(1)-$(2)-$(3):
-	@mkdir -p $(BIN_DIR)
-	GOOS=$(2) GOARCH=$(3) go build -o $(BIN_DIR)/$(1)-$(2)-$(3)$(if $(filter windows,$(2)),.exe,) ./$(TOOLS_DIR)/$(1)
-endef
-
-# Generate targets for ioimg and iovid across all platform/architecture combinations
-$(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY_TARGET,ioimg,$(p),$(a)))))
-$(foreach p,$(platforms),$(foreach a,$(architectures),$(eval $(call BUILD_BINARY_TARGET,iovid,$(p),$(a)))))
-
-test:
-	@echo "Running Go Unit Tests (iocore)..."
-	go test ./libs/iocore
-	@echo "Running Integration Tests..."
-	./scripts/test_examples.sh
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" \
+	    -o $(BIN_DIR)/iosuite ./cmd/iosuite
 
 clean:
 	rm -rf $(BIN_DIR)
+
+fmt:
+	go fmt ./...
+
+vet:
+	go vet ./...
+
+test:
+	go test ./...
+
+install: build
+	install -m 0755 $(BIN_DIR)/iosuite /usr/local/bin/iosuite
