@@ -26,6 +26,7 @@ import (
 
 	"iosuite.io/internal/config"
 	"iosuite.io/internal/doctor"
+	"iosuite.io/internal/endpoint"
 	"iosuite.io/internal/runtime"
 	"iosuite.io/internal/serve"
 	"iosuite.io/internal/upscale"
@@ -49,6 +50,7 @@ Usage:
 Commands:
   upscale       Upscale an image or directory (subprocesses real-esrgan-serve)
   serve         Long-lived HTTP daemon (warm engine; what iosuite.io talks to)
+  endpoint      Manage remote provider endpoints (deploy / list / destroy)
   doctor        Diagnose this host: PATH, Python, GPU, auth keys
   fetch-model   Download a verified model artefact (forwarded to real-esrgan-serve)
   version       Print version + commit
@@ -78,6 +80,9 @@ func run() error {
 
 	case "serve":
 		return cmdServe(args)
+
+	case "endpoint":
+		return cmdEndpoint(args)
 
 	case "doctor":
 		return cmdDoctor(args)
@@ -226,6 +231,156 @@ Flags:`)
 	default:
 		return fmt.Errorf("unknown provider %q (expected local | runpod | serve)", prov)
 	}
+}
+
+// cmdEndpoint dispatches `iosuite endpoint <subcommand>`. Sub-subs
+// (deploy / list / destroy) parse their own flag sets.
+func cmdEndpoint(args []string) error {
+	if len(args) == 0 {
+		fmt.Println(`Usage: iosuite endpoint <subcommand> [flags]
+
+Subcommands:
+  deploy    Create or update a serverless endpoint on a provider
+  list      List existing endpoints
+  destroy   Delete an endpoint
+
+Each subcommand accepts --provider runpod (the only supported provider
+in this round). RunPod credentials come from --runpod-api-key flag,
+$RUNPOD_API_KEY env, or [runpod] api_key in ~/.config/iosuite/config.toml.`)
+		return nil
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "deploy":
+		return cmdEndpointDeploy(rest)
+	case "list":
+		return cmdEndpointList(rest)
+	case "destroy":
+		return cmdEndpointDestroy(rest)
+	case "-h", "--help", "help":
+		return cmdEndpoint(nil)
+	default:
+		return fmt.Errorf("unknown endpoint subcommand: %s", sub)
+	}
+}
+
+func cmdEndpointDeploy(args []string) error {
+	fs := flag.NewFlagSet("endpoint deploy", flag.ExitOnError)
+	var (
+		provider     = fs.String("provider", "runpod", "Provider (runpod is the only supported value today)")
+		tool         = fs.String("tool", "real-esrgan", "Tool to deploy (real-esrgan)")
+		gpuClass     = fs.String("gpu-class", "rtx-4090", "GPU class — rtx-4090, rtx-3090, l40s, etc.")
+		name         = fs.String("name", "", "Endpoint name (default: <tool>-<gpu-class>)")
+		apiKey       = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+		workersMax   = fs.Int("workers-max", 0, "Max concurrent workers (0 = tool default)")
+		idleTimeout  = fs.Int("idle-timeout", 0, "Worker idle timeout in seconds (0 = tool default)")
+	)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `Usage: iosuite endpoint deploy [flags]
+
+Create (or update) a serverless endpoint on a provider. Idempotent:
+re-running with the same name updates the template + endpoint
+in-place.
+
+Flags:`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	key := resolveRunpodAPIKey(*apiKey, cfg)
+	in := endpoint.DeployInput{
+		Provider:     *provider,
+		Tool:         *tool,
+		GPUClass:     *gpuClass,
+		Name:         *name,
+		APIKey:       key,
+		WorkersMax:   *workersMax,
+		IdleTimeoutS: *idleTimeout,
+		UserAgent:    fmt.Sprintf("iosuite/%s", version.Version),
+	}
+	res, err := endpoint.Deploy(context.Background(), in)
+	if err != nil {
+		return err
+	}
+	endpoint.PrintDeploy(os.Stdout, res)
+	return nil
+}
+
+func cmdEndpointList(args []string) error {
+	fs := flag.NewFlagSet("endpoint list", flag.ExitOnError)
+	var (
+		provider = fs.String("provider", "runpod", "Provider")
+		apiKey   = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	endpoints, err := endpoint.List(context.Background(), *provider,
+		resolveRunpodAPIKey(*apiKey, cfg),
+		fmt.Sprintf("iosuite/%s", version.Version))
+	if err != nil {
+		return err
+	}
+	if len(endpoints) == 0 {
+		fmt.Println("(no endpoints on this account)")
+		return nil
+	}
+	for _, e := range endpoints {
+		fmt.Printf("  %s  %s  template=%s\n", e.ID, e.Name, e.TemplateID)
+	}
+	return nil
+}
+
+func cmdEndpointDestroy(args []string) error {
+	fs := flag.NewFlagSet("endpoint destroy", flag.ExitOnError)
+	var (
+		provider = fs.String("provider", "runpod", "Provider")
+		name     = fs.String("name", "", "Endpoint name (alternative to passing the id positionally)")
+		apiKey   = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
+	)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	id := ""
+	if fs.NArg() > 0 {
+		id = fs.Arg(0)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	deleted, err := endpoint.Destroy(context.Background(), *provider,
+		resolveRunpodAPIKey(*apiKey, cfg),
+		fmt.Sprintf("iosuite/%s", version.Version),
+		id, *name)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("deleted endpoint: %s\n", deleted)
+	return nil
+}
+
+// resolveRunpodAPIKey applies the precedence: flag > env > config.
+// Empty return is a soft signal — let the underlying call surface
+// the actionable error (which mentions all three sources).
+func resolveRunpodAPIKey(flagVal string, cfg config.Config) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if env := os.Getenv("RUNPOD_API_KEY"); env != "" {
+		return env
+	}
+	return cfg.RunpodAPIKey
 }
 
 // cmdFetchModel forwards every flag to `real-esrgan-serve fetch-model`
