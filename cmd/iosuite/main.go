@@ -28,6 +28,8 @@ import (
 	"iosuite.io/internal/config"
 	"iosuite.io/internal/doctor"
 	"iosuite.io/internal/endpoint"
+	"iosuite.io/internal/manifest"
+	"iosuite.io/internal/registry"
 	"iosuite.io/internal/runtime"
 	"iosuite.io/internal/serve"
 	"iosuite.io/internal/upscale"
@@ -328,7 +330,14 @@ func cmdEndpointDeploy(args []string) error {
 		// tool default). Go's flag package only does true booleans;
 		// we model the unset case by walking fs.Visit() after Parse.
 		flashboot      = fs.Bool("flashboot", true, "Enable RunPod FlashBoot (snapshot resume) for faster cold starts")
-		minCudaVersion = fs.String("min-cuda", "", "Pin workers to RunPod hosts with NVIDIA driver supporting this CUDA version or newer (e.g. 12.8). Empty = use tool default")
+		minCudaVersion = fs.String("min-cuda", "", "Pin workers to RunPod hosts with NVIDIA driver supporting this CUDA version or newer (e.g. 12.8). Empty = use the manifest's value")
+		// Manifest resolution. --version selects the git tag of the
+		// *-serve repo whose deploy/runpod.json iosuite reads. Empty
+		// = the registry's StableVersion. --manifest overrides the
+		// fetch entirely with a local file (dev workflow before
+		// pushing the manifest to the serve repo).
+		manifestVersion = fs.String("version", "", "Git tag of the *-serve repo to read the manifest from (default: registry's stable version)")
+		manifestPath    = fs.String("manifest", "", "Read deploy manifest from a local file instead of fetching by tool+version (dev override)")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), `Usage: iosuite endpoint deploy [flags]
@@ -349,9 +358,36 @@ Flags:`)
 		return err
 	}
 	key := resolveRunpodAPIKey(*apiKey, cfg)
+
+	// Resolve the deploy manifest before we touch RunPod. Local file
+	// wins (dev override); otherwise fetch from the *-serve repo at
+	// the requested git tag.
+	ctx := context.Background()
+	var (
+		man          *manifest.Manifest
+		manifestSrc  string
+	)
+	if *manifestPath != "" {
+		man, err = manifest.LoadFile(*manifestPath)
+		if err != nil {
+			return err
+		}
+		manifestSrc = *manifestPath
+	} else {
+		url, err := registry.ManifestURL(*tool, *manifestVersion)
+		if err != nil {
+			return err
+		}
+		man, err = manifest.Fetch(ctx, url)
+		if err != nil {
+			return err
+		}
+		manifestSrc = url
+	}
+
 	// Distinguish "user passed --flashboot=…" from "user didn't pass
 	// it"; the endpoint package needs the latter to fall back to the
-	// per-tool default. flag.Visit walks only flags that were set.
+	// manifest default. flag.Visit walks only flags that were set.
 	var flashbootSet bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "flashboot" {
@@ -364,6 +400,7 @@ Flags:`)
 		GPUClass:       *gpuClass,
 		Name:           *name,
 		APIKey:         key,
+		Manifest:       man,
 		WorkersMax:     *workersMax,
 		IdleTimeoutS:   *idleTimeout,
 		MinCudaVersion: *minCudaVersion,
@@ -372,10 +409,11 @@ Flags:`)
 	if flashbootSet {
 		in.Flashboot = flashboot
 	}
-	res, err := endpoint.Deploy(context.Background(), in)
+	res, err := endpoint.Deploy(ctx, in)
 	if err != nil {
 		return err
 	}
+	res.ManifestSource = manifestSrc
 	endpoint.PrintDeploy(os.Stdout, res)
 	return nil
 }

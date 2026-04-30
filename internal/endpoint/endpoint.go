@@ -2,24 +2,27 @@
 //
 // Manages remote provider endpoints (RunPod first; vast.ai / Modal
 // later) so users can stand up the GPU side of the stack with one
-// command. Round 2 of iosuite ships RunPod only.
+// command.
 //
 // What `iosuite endpoint deploy --provider runpod --tool real-esrgan`
 // does today:
 //
-//  1. Look up (or create) a RunPod template with the right image
-//     and disk for the chosen tool. Image tag is pinned by iosuite's
-//     own version — `iosuite endpoint deploy` always points at the
-//     image that this version was tested with.
-//  2. Look up (or create) a serverless endpoint named after `--name`
-//     (default: `<tool>-<gpu-class>`) wired to that template, on the
-//     GPU pool matching `--gpu-class`.
-//  3. Print the endpoint id + ready-to-paste env line.
+//  1. Resolve the tool's deploy manifest. The caller (cobra layer)
+//     fetches a deploy/runpod.json from the *-serve repo at the
+//     requested git tag (see internal/registry + internal/manifest)
+//     and passes it via DeployInput.Manifest. iosuite holds NO
+//     per-tool implementation knowledge — image, disk, GPU pools,
+//     CUDA pin, FlashBoot default all flow from the manifest.
+//  2. Look up (or create) a RunPod template with the manifest's
+//     image and disk.
+//  3. Look up (or create) a serverless endpoint named after `--name`
+//     (default: `<tool>-<gpu-class>`) wired to that template, on
+//     the GPU pool the manifest declares for `--gpu-class`.
+//  4. Print the endpoint id + ready-to-paste env line.
 //
 // Round 3 will add the smoke-test (cold start measurement, warm
-// latency probe) that real-esrgan-serve's build/runpod_deploy.py
-// already does — moving that here keeps the deploy story coherent
-// for future tools without forking the python script per tool.
+// latency probe) — which moves to `iosuite endpoint benchmark`,
+// driven by deploy/benchmark.json on the *-serve side.
 package endpoint
 
 import (
@@ -28,6 +31,7 @@ import (
 	"io"
 	"strings"
 
+	"iosuite.io/internal/manifest"
 	"iosuite.io/internal/runpod"
 )
 
@@ -39,22 +43,28 @@ const (
 )
 
 // DeployInput captures everything `iosuite endpoint deploy` needs.
+// Manifest is required — the caller resolves it before calling
+// Deploy(). All per-tool knowledge lives there, not here.
 type DeployInput struct {
-	Provider     string // ProviderRunPod
-	Tool         string // "real-esrgan" (round 2 only)
-	GPUClass     string // "rtx-4090" etc; mapped to a RunPod pool
-	Name         string // endpoint name; auto-derived if empty
-	APIKey       string // RunPod API key
-	WorkersMax   int    // 0 → tool default
-	IdleTimeoutS int    // 0 → tool default
-	// Flashboot enables RunPod FlashBoot snapshot resume on the
-	// endpoint. Pointer-typed so the cobra layer can distinguish
-	// "user didn't pass --flashboot" (nil → use the tool default)
-	// from an explicit --flashboot=false override.
+	Provider string // ProviderRunPod
+	Tool     string // "real-esrgan" — used only for naming/UA
+	GPUClass string // "rtx-4090" etc; mapped to a pool via Manifest.GPUPools
+	Name     string // endpoint name; auto-derived if empty
+	APIKey   string // RunPod API key
+	// Manifest is the parsed deploy spec. Caller owns fetching and
+	// validation (typically via internal/registry + internal/manifest).
+	Manifest *manifest.Manifest
+	// Per-call overrides. Each defaults to the matching field on
+	// Manifest.Endpoint when zero/nil.
+	WorkersMax   int
+	IdleTimeoutS int
+	// Flashboot is *bool so "user didn't pass --flashboot" (nil) is
+	// distinguishable from explicit --flashboot=false. nil → use
+	// the manifest's default.
 	Flashboot *bool
-	// MinCudaVersion forces RunPod to only schedule workers on hosts
-	// whose driver supports this CUDA version or newer. Empty →
-	// fall back to the per-tool default in tools.go.
+	// MinCudaVersion overrides the manifest's value. Empty = use
+	// the manifest's value (which itself may be empty for tools
+	// that don't pin a driver).
 	MinCudaVersion string
 	UserAgent      string // surfaced to RunPod logs; iosuite/<version>
 }
@@ -68,6 +78,7 @@ type DeployResult struct {
 	GPUPool        string
 	Flashboot      bool
 	MinCudaVersion string
+	ManifestSource string // URL or filepath the manifest came from; informational
 }
 
 // Deploy runs the full create-or-update flow. Idempotent: re-running
@@ -82,13 +93,19 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 	if in.APIKey == "" {
 		return nil, fmt.Errorf("RunPod API key required (--runpod-api-key, RUNPOD_API_KEY, or [runpod] api_key in config)")
 	}
-	tool, ok := Tools[in.Tool]
-	if !ok {
-		return nil, fmt.Errorf("unknown tool %q. Known: %s", in.Tool, strings.Join(toolNames(), ", "))
+	if in.Manifest == nil {
+		return nil, fmt.Errorf("DeployInput.Manifest is required — the cobra layer should resolve it via internal/registry + internal/manifest before calling Deploy")
 	}
-	pool, ok := GPUPools[in.GPUClass]
+	m := in.Manifest
+
+	pool, ok := m.GPUPools[in.GPUClass]
 	if !ok {
-		return nil, fmt.Errorf("unknown gpu-class %q. Known: %s", in.GPUClass, strings.Join(gpuClassNames(), ", "))
+		known := make([]string, 0, len(m.GPUPools))
+		for k := range m.GPUPools {
+			known = append(known, k)
+		}
+		return nil, fmt.Errorf("gpu-class %q not declared by the %s manifest. Known: %s",
+			in.GPUClass, m.Tool, strings.Join(known, ", "))
 	}
 
 	name := in.Name
@@ -102,15 +119,18 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 
 	rp := runpod.NewClient(in.APIKey, in.UserAgent)
 
-	// Template — find or save.
+	// Template — find or save. Image + disk + env all come from the
+	// manifest so a tool bump (e.g. new image tag, new env) lands by
+	// pushing a new manifest, not by patching iosuite.
 	existingTmpl, err := rp.FindTemplate(ctx, templateName)
 	if err != nil {
 		return nil, fmt.Errorf("look up template: %w", err)
 	}
 	tmplInput := runpod.SaveTemplateInput{
 		Name:            templateName,
-		Image:           tool.Image,
-		ContainerDiskGB: tool.ContainerDiskGB,
+		Image:           m.Image,
+		ContainerDiskGB: m.Endpoint.ContainerDiskGB,
+		Env:             toRunpodEnv(m.Env),
 	}
 	if existingTmpl != nil {
 		tmplInput.ExistingID = existingTmpl.ID
@@ -120,16 +140,17 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 		return nil, fmt.Errorf("save template: %w", err)
 	}
 
-	// Endpoint — find or save.
+	// Endpoint — find or save. Defaults from the manifest, overridable
+	// per call.
 	existing, err := rp.FindEndpoint(ctx, name)
 	if err != nil {
 		return nil, fmt.Errorf("look up endpoint: %w", err)
 	}
-	flashboot := tool.Flashboot
+	flashboot := m.Endpoint.FlashbootDefault
 	if in.Flashboot != nil {
 		flashboot = *in.Flashboot
 	}
-	minCuda := tool.MinCudaVersion
+	minCuda := m.Endpoint.MinCudaVersion
 	if in.MinCudaVersion != "" {
 		minCuda = in.MinCudaVersion
 	}
@@ -138,8 +159,8 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 		TemplateID:     templateID,
 		GPUPool:        pool,
 		WorkersMin:     0,
-		WorkersMax:     defaultIfZero(in.WorkersMax, tool.WorkersMax),
-		IdleTimeoutS:   defaultIfZero(in.IdleTimeoutS, tool.IdleTimeoutS),
+		WorkersMax:     defaultIfZero(in.WorkersMax, m.Endpoint.WorkersMaxDefault),
+		IdleTimeoutS:   defaultIfZero(in.IdleTimeoutS, m.Endpoint.IdleTimeoutSDefault),
 		Flashboot:      flashboot,
 		MinCudaVersion: minCuda,
 	}
@@ -155,7 +176,7 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 		EndpointID:     endpointID,
 		EndpointName:   name,
 		TemplateID:     templateID,
-		Image:          tool.Image,
+		Image:          m.Image,
 		GPUPool:        pool,
 		Flashboot:      flashboot,
 		MinCudaVersion: minCuda,
@@ -221,6 +242,9 @@ func PrintDeploy(w io.Writer, r *DeployResult) {
 	if r.MinCudaVersion != "" {
 		fmt.Fprintf(w, "  min cuda:      %s (driver-pinned)\n", r.MinCudaVersion)
 	}
+	if r.ManifestSource != "" {
+		fmt.Fprintf(w, "  manifest:      %s\n", r.ManifestSource)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "ready-to-use env line for clients:")
 	fmt.Fprintf(w, "  export RUNPOD_ENDPOINT_ID=%s\n", r.EndpointID)
@@ -233,18 +257,14 @@ func defaultIfZero(v, def int) int {
 	return v
 }
 
-func toolNames() []string {
-	out := make([]string, 0, len(Tools))
-	for k := range Tools {
-		out = append(out, k)
-	}
-	return out
-}
-
-func gpuClassNames() []string {
-	out := make([]string, 0, len(GPUPools))
-	for k := range GPUPools {
-		out = append(out, k)
+// toRunpodEnv converts manifest env entries to the runpod-client
+// shape. Two structs because the manifest package shouldn't depend
+// on the runpod client (would entangle two packages that otherwise
+// have no shared concerns).
+func toRunpodEnv(in []manifest.EnvVar) []runpod.EnvVar {
+	out := make([]runpod.EnvVar, len(in))
+	for i, e := range in {
+		out[i] = runpod.EnvVar{Key: e.Key, Value: e.Value}
 	}
 	return out
 }
