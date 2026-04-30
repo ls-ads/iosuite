@@ -27,6 +27,7 @@ import (
 	"iosuite.io/internal/config"
 	"iosuite.io/internal/doctor"
 	"iosuite.io/internal/runtime"
+	"iosuite.io/internal/serve"
 	"iosuite.io/internal/upscale"
 	"iosuite.io/internal/version"
 )
@@ -47,6 +48,7 @@ Usage:
 
 Commands:
   upscale       Upscale an image or directory (subprocesses real-esrgan-serve)
+  serve         Long-lived HTTP daemon (warm engine; what iosuite.io talks to)
   doctor        Diagnose this host: PATH, Python, GPU, auth keys
   fetch-model   Download a verified model artefact (forwarded to real-esrgan-serve)
   version       Print version + commit
@@ -73,6 +75,9 @@ func run() error {
 
 	case "upscale":
 		return cmdUpscale(args)
+
+	case "serve":
+		return cmdServe(args)
 
 	case "doctor":
 		return cmdDoctor(args)
@@ -155,6 +160,72 @@ warnings but don't affect the exit code.`)
 		os.Exit(3)
 	}
 	return nil
+}
+
+func cmdServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	var (
+		bind       = fs.String("bind", "127.0.0.1", "Bind address (use 0.0.0.0 to expose on LAN)")
+		port       = fs.Int("port", 8312, "TCP port to bind")
+		provider   = fs.String("provider", "", "local | runpod | serve (defaults from config)")
+		model      = fs.String("model", "", "Model to keep warm (default: realesrgan-x4plus)")
+		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU)")
+		runtimeBin = fs.String("runtime", "", "Override path to the real-esrgan-serve binary (local provider only)")
+		subPort    = fs.Int("subprocess-port", 8311, "Loopback port for the wrapped real-esrgan-serve serve (local provider only)")
+	)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `Usage: iosuite serve [flags]
+
+Run iosuite as a long-lived HTTP daemon. Holds a warm inference
+session so consumers (iosuite.io's backend, your own apps) avoid the
+cold-start cost on every request.
+
+Endpoints:
+  POST /upscale      multipart/form-data with 'image' field, returns image bytes
+  GET  /health       {"status":"ok"} when the backend is reachable
+
+Flags:`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	prov := *provider
+	if prov == "" {
+		prov = cfg.Provider
+	}
+	switch prov {
+	case "local":
+		bin, err := runtime.LocateRealEsrganServe(*runtimeBin)
+		if err != nil {
+			return err
+		}
+		modelName := *model
+		if modelName == "" {
+			modelName = cfg.Model
+		}
+		local := serve.NewLocal(serve.LocalProviderOptions{
+			Bin:            bin,
+			SubprocessPort: *subPort,
+			Model:          modelName,
+			GPUID:          *gpuID,
+		})
+		return serve.Run(context.Background(), serve.Options{
+			Bind:     *bind,
+			Port:     *port,
+			Provider: local,
+		})
+	case "runpod", "serve":
+		return fmt.Errorf("provider %q is planned but not yet implemented; use --provider local", prov)
+	default:
+		return fmt.Errorf("unknown provider %q (expected local | runpod | serve)", prov)
+	}
 }
 
 // cmdFetchModel forwards every flag to `real-esrgan-serve fetch-model`
