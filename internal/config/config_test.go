@@ -14,9 +14,6 @@ func TestDefaults(t *testing.T) {
 	if cfg.Model != "realesrgan-x4plus" {
 		t.Errorf("default model = %q, want %q", cfg.Model, "realesrgan-x4plus")
 	}
-	if cfg.ServeURL == "" {
-		t.Errorf("default ServeURL is empty — should be a usable loopback URL")
-	}
 }
 
 func TestLoad_MissingFileFallsBackToDefaults(t *testing.T) {
@@ -71,7 +68,7 @@ func TestLoad_StripsQuotesAndInlineComments(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := `[default]
-provider   = "serve"     # inline comment after value
+provider   = "runpod"    # inline comment after value
 output_dir = '/tmp/out'  # single-quote form
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o644); err != nil {
@@ -82,8 +79,8 @@ output_dir = '/tmp/out'  # single-quote form
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Provider != "serve" {
-		t.Errorf("Provider = %q, want %q", cfg.Provider, "serve")
+	if cfg.Provider != "runpod" {
+		t.Errorf("Provider = %q, want %q", cfg.Provider, "runpod")
 	}
 	if cfg.OutputDir != "/tmp/out" {
 		t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, "/tmp/out")

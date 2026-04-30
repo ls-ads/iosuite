@@ -6,17 +6,14 @@
 // child's stdout/stderr go straight to ours so progress events,
 // errors, and tracebacks all surface in real time.
 //
-// Round 1 wires only the local provider (subprocess to the binary on
-// this host). The `runpod` and `serve` providers slot in at the same
-// callsite once they exist; the `--provider` flag is wired now so
-// users see the future shape in `--help`.
+// Local-only today. Sending an upscale to a remote endpoint goes
+// through `iosuite serve --provider runpod` instead.
 package upscale
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -54,13 +51,8 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 	if provider == "" {
 		provider = cfg.Provider
 	}
-	switch provider {
-	case "local":
-		// fall through
-	case "runpod", "serve":
-		return fmt.Errorf("provider %q is planned but not yet implemented; use --provider local", provider)
-	default:
-		return fmt.Errorf("unknown provider %q (expected local | runpod | serve)", provider)
+	if provider != "local" {
+		return fmt.Errorf("`iosuite upscale` is local-only (got --provider %q). For remote inference, run `iosuite serve --provider runpod` and POST to the daemon.", provider)
 	}
 
 	bin, err := runtime.LocateRealEsrganServe(opts.RuntimeBin)
@@ -131,12 +123,3 @@ func derivedOutputPath(input, outDir string) string {
 	return filepath.Join(dir, stem+"_4x"+ext)
 }
 
-// CopyStreams is exposed for callers that need to wire stdout/stderr
-// to non-terminal sinks (e.g., a future `iosuite serve` mode that
-// captures helper output to a buffered log). Round 1 doesn't use it
-// directly but reserving the helper keeps Run() clean if streaming
-// changes later.
-func CopyStreams(dst io.Writer, src io.Reader) error {
-	_, err := io.Copy(dst, src)
-	return err
-}

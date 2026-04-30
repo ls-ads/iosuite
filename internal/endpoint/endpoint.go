@@ -5,7 +5,7 @@
 // command.
 //
 // What `iosuite endpoint deploy --provider runpod --tool real-esrgan`
-// does today:
+// does:
 //
 //  1. Resolve the tool's deploy manifest. The caller (cobra layer)
 //     fetches a deploy/runpod.json from the *-serve repo at the
@@ -20,9 +20,9 @@
 //     the GPU pool the manifest declares for `--gpu-class`.
 //  4. Print the endpoint id + ready-to-paste env line.
 //
-// Round 3 will add the smoke-test (cold start measurement, warm
-// latency probe) — which moves to `iosuite endpoint benchmark`,
-// driven by deploy/benchmark.json on the *-serve side.
+// Cold-start + warm-latency measurement lives in `iosuite endpoint
+// benchmark` (internal/benchmark), driven by deploy/benchmark.json
+// on the *-serve side.
 package endpoint
 
 import (

@@ -8,14 +8,12 @@
 package doctor
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 
 	"iosuite.io/internal/config"
 	rrt "iosuite.io/internal/runtime"
@@ -24,7 +22,7 @@ import (
 // Run prints diagnostic results to w and returns true when every
 // required check passed. Optional checks emit warnings but don't
 // affect the return value.
-func Run(ctx context.Context, w io.Writer, cfg config.Config) bool {
+func Run(w io.Writer, cfg config.Config) bool {
 	allOK := true
 
 	fmt.Fprintln(w, "iosuite doctor — diagnosing host")
@@ -41,13 +39,11 @@ func Run(ctx context.Context, w io.Writer, cfg config.Config) bool {
 		fmt.Fprintf(w, "      → install: https://github.com/ls-ads/real-esrgan-serve/releases\n")
 	} else {
 		fmt.Fprintf(w, "  ✓  real-esrgan-serve  %s\n", bin)
-		// 3. Probe it actually runs (catches "binary exists but
-		// linker dies on missing libc" cases on weird hosts). The
-		// 10s timeout is generous for a cold cache; a warm probe
-		// returns in milliseconds.
-		_, cancel := context.WithTimeout(ctx, 10*time.Second)
+		// Probe it actually runs (catches "binary exists but
+		// linker dies on missing libc" cases on weird hosts).
+		// `--version` returns in milliseconds on a warm cache,
+		// which is fast enough that no timeout is required.
 		ver, perr := rrt.Probe(bin)
-		cancel()
 		if perr != nil {
 			allOK = false
 			fmt.Fprintf(w, "  ✗  real-esrgan-serve --version failed: %v\n", perr)
@@ -76,11 +72,11 @@ func Run(ctx context.Context, w io.Writer, cfg config.Config) bool {
 
 	// 6. Provider sanity
 	switch cfg.Provider {
-	case "local", "runpod", "serve":
+	case "local", "runpod":
 		fmt.Fprintf(w, "  ℹ  default provider  %s\n", cfg.Provider)
 	default:
 		allOK = false
-		fmt.Fprintf(w, "  ✗  default provider  %q (expected local | runpod | serve)\n", cfg.Provider)
+		fmt.Fprintf(w, "  ✗  default provider  %q (expected local | runpod)\n", cfg.Provider)
 	}
 
 	fmt.Fprintln(w, strings.Repeat("─", 56))

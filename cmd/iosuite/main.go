@@ -18,15 +18,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
-
-	"encoding/base64"
 	"strings"
+	"time"
 
 	"iosuite.io/internal/benchmark"
 	"iosuite.io/internal/config"
@@ -166,7 +165,7 @@ warnings but don't affect the exit code.`)
 	if err != nil {
 		return err
 	}
-	if !doctor.Run(context.Background(), os.Stdout, cfg) {
+	if !doctor.Run(os.Stdout, cfg) {
 		// Use exit code 3 (environment error) per the documented
 		// iosuite exit-code contract — same as real-esrgan-serve.
 		os.Exit(3)
@@ -179,7 +178,7 @@ func cmdServe(args []string) error {
 	var (
 		bind       = fs.String("bind", "127.0.0.1", "Bind address (use 0.0.0.0 to expose on LAN)")
 		port       = fs.Int("port", 8312, "TCP port to bind")
-		provider   = fs.String("provider", "", "local | runpod | serve (defaults from config)")
+		provider   = fs.String("provider", "", "local | runpod (defaults from config)")
 		model      = fs.String("model", "", "Model to keep warm (default: realesrgan-x4plus)")
 		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU)")
 		runtimeBin = fs.String("runtime", "", "Override path to the real-esrgan-serve binary (local provider only)")
@@ -187,7 +186,6 @@ func cmdServe(args []string) error {
 		// RunPod provider flags
 		endpointID   = fs.String("endpoint-id", "", "RunPod endpoint id (runpod provider only)")
 		runpodAPIKey = fs.String("runpod-api-key", "", "RunPod API key (overrides env + config)")
-		tile         = fs.Bool("tile", true, "Enable worker-side tiling for inputs >1280² (runpod provider only)")
 		// PollMax — how long the daemon waits on a single RunPod job
 		// before giving up. 10m default; bump for slow / cold-prone
 		// endpoints. Falls back to IOSUITE_POLL_MAX env when the flag
@@ -202,8 +200,8 @@ session so consumers (iosuite.io's backend, your own apps) avoid the
 cold-start cost on every request.
 
 Endpoints:
-  POST /upscale      multipart/form-data with 'image' field, returns image bytes
-  GET  /health       {"status":"ok"} when the backend is reachable
+  POST /runsync     application/json envelope ({"input": ...}); /upscale alias
+  GET  /health      {"status":"ok"} when the backend is reachable
 
 Flags:`)
 		fs.PrintDefaults()
@@ -257,11 +255,6 @@ Flags:`)
 		if key == "" {
 			return fmt.Errorf("runpod provider requires API key (--runpod-api-key, RUNPOD_API_KEY env, or [runpod] api_key in config)")
 		}
-		// Tile is now per-request — caller sets it in the JobRequest
-		// payload so a single daemon can serve mixed traffic. The
-		// --tile flag is kept for compat but no longer applies at
-		// daemon level; document accordingly.
-		_ = *tile
 		pm := *pollMax
 		if pm == 0 {
 			if env := os.Getenv("IOSUITE_POLL_MAX"); env != "" {
@@ -282,10 +275,8 @@ Flags:`)
 			Port:     *port,
 			Provider: rp,
 		})
-	case "serve":
-		return fmt.Errorf("provider %q is planned but not yet implemented; use --provider local or --provider runpod", prov)
 	default:
-		return fmt.Errorf("unknown provider %q (expected local | runpod | serve)", prov)
+		return fmt.Errorf("unknown provider %q (expected local | runpod)", prov)
 	}
 }
 
@@ -532,10 +523,9 @@ Flags:`)
 	// Resolve the benchmark manifest. Local file wins (dev override);
 	// otherwise fetch from the *-serve repo at the requested tag.
 	var (
-		bench       *manifest.BenchmarkManifest
-		bSource     string
-		baseURL     string
-		fetchedFile bool
+		bench   *manifest.BenchmarkManifest
+		bSource string
+		baseURL string
 	)
 	if *benchmarkPath != "" {
 		bench, err = manifest.LoadBenchmarkFile(*benchmarkPath)
@@ -558,9 +548,7 @@ Flags:`)
 		}
 		bSource = url
 		baseURL = url
-		fetchedFile = true
 	}
-	_ = fetchedFile
 
 	// Fetch the input image. --input-resource takes precedence; else
 	// resolve relative to the manifest's source.

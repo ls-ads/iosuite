@@ -20,16 +20,13 @@ import (
 // / built-in default" — never panic on a missing field.
 type Config struct {
 	// [default]
-	Provider  string // "local" | "runpod" | "serve"
+	Provider  string // "local" | "runpod"
 	OutputDir string // empty = alongside input
 	Model     string // e.g. "realesrgan-x4plus"
 
 	// [runpod]
 	RunpodAPIKey     string
 	RunpodEndpointID string
-
-	// [serve]
-	ServeURL string
 }
 
 // Defaults are baked-in fallbacks. Used when the config file is
@@ -38,7 +35,6 @@ func Defaults() Config {
 	return Config{
 		Provider: "local",
 		Model:    "realesrgan-x4plus",
-		ServeURL: "http://127.0.0.1:8311",
 	}
 }
 
@@ -131,11 +127,6 @@ func apply(cfg *Config, section, key, val string) {
 			cfg.RunpodAPIKey = val
 		case "endpoint_id":
 			cfg.RunpodEndpointID = val
-		}
-	case "serve":
-		switch key {
-		case "url":
-			cfg.ServeURL = val
 		}
 	}
 }

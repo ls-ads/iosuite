@@ -269,8 +269,9 @@ func (c *Client) SaveTemplate(ctx context.Context, in SaveTemplateInput) (string
 }
 
 // SaveEndpoint creates or updates a serverless endpoint. GPU IDs are
-// the comma-separated pool name(s) like "ADA_24" — see
-// internal/endpoint/runpod.go for the GPU-class → pool mapping.
+// the comma-separated pool name(s) like "ADA_24" — the caller resolves
+// the pool string from the deploy manifest's `gpu_pools` map (see
+// internal/manifest + the *-serve repo's deploy/SCHEMA.md).
 type SaveEndpointInput struct {
 	Name         string
 	TemplateID   string

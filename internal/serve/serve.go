@@ -245,7 +245,7 @@ func newReqID() string {
 
 // ProviderError marks "the backend is unhealthy / failed our request"
 // so the HTTP layer can map to 502 instead of 500. Caller-facing
-// errors (bad multipart, oversize input) should be returned as
+// errors (bad envelope, oversize input) should be returned as
 // ordinary errors → 500 → caller can decode and re-classify.
 type ProviderError struct {
 	Underlying error
