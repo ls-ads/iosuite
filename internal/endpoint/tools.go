@@ -28,6 +28,14 @@ type Tool struct {
 	// images are large enough that re-pulling on every cold start
 	// dominates user-visible latency. Override via --flashboot=false.
 	Flashboot bool
+	// MinCudaVersion pins workers to RunPod hosts whose NVIDIA driver
+	// supports this CUDA version (or newer). Must match what the
+	// container image bundles. Without this, workers can land on
+	// hosts with older drivers and fail at container init with
+	// "nvidia-container-cli: requirement error: unsatisfied condition:
+	// cuda>=X" — never reaching the handler, never returning a
+	// useful error to the daemon, surfacing only as "stuck queue".
+	MinCudaVersion string
 }
 
 // Tools is the iosuite-known catalog. New tools land here when the
@@ -47,6 +55,13 @@ var Tools = map[string]Tool{
 		// engine load takes ~30 s on top of the pull; snapshot
 		// resume drops cold start from ~45 s to ~5 s.
 		Flashboot: true,
+		// runpod-trt-0.2.1 bundles tensorrt-cu12 (CUDA 12.8 runtime)
+		// via Dockerfile.trt's `FROM nvidia/cuda:12.8.0-base-…`. Hosts
+		// with older NVIDIA drivers reject the container at init with
+		// `cuda>=12.8` errors — workers never reach the handler, jobs
+		// pile up IN_QUEUE forever, the daemon eventually times out.
+		// Pinning to 12.8 here keeps workers off those hosts.
+		MinCudaVersion: "12.8",
 	},
 	// Future:
 	//   "whisper":          {Image: "ghcr.io/ls-ads/whisper-serve:..."}

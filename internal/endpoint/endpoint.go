@@ -52,17 +52,22 @@ type DeployInput struct {
 	// "user didn't pass --flashboot" (nil → use the tool default)
 	// from an explicit --flashboot=false override.
 	Flashboot *bool
-	UserAgent string // surfaced to RunPod logs; iosuite/<version>
+	// MinCudaVersion forces RunPod to only schedule workers on hosts
+	// whose driver supports this CUDA version or newer. Empty →
+	// fall back to the per-tool default in tools.go.
+	MinCudaVersion string
+	UserAgent      string // surfaced to RunPod logs; iosuite/<version>
 }
 
 // DeployResult carries the outputs of a successful deploy.
 type DeployResult struct {
-	EndpointID   string
-	EndpointName string
-	TemplateID   string
-	Image        string
-	GPUPool      string
-	Flashboot    bool
+	EndpointID     string
+	EndpointName   string
+	TemplateID     string
+	Image          string
+	GPUPool        string
+	Flashboot      bool
+	MinCudaVersion string
 }
 
 // Deploy runs the full create-or-update flow. Idempotent: re-running
@@ -124,14 +129,19 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 	if in.Flashboot != nil {
 		flashboot = *in.Flashboot
 	}
+	minCuda := tool.MinCudaVersion
+	if in.MinCudaVersion != "" {
+		minCuda = in.MinCudaVersion
+	}
 	epInput := runpod.SaveEndpointInput{
-		Name:         name,
-		TemplateID:   templateID,
-		GPUPool:      pool,
-		WorkersMin:   0,
-		WorkersMax:   defaultIfZero(in.WorkersMax, tool.WorkersMax),
-		IdleTimeoutS: defaultIfZero(in.IdleTimeoutS, tool.IdleTimeoutS),
-		Flashboot:    flashboot,
+		Name:           name,
+		TemplateID:     templateID,
+		GPUPool:        pool,
+		WorkersMin:     0,
+		WorkersMax:     defaultIfZero(in.WorkersMax, tool.WorkersMax),
+		IdleTimeoutS:   defaultIfZero(in.IdleTimeoutS, tool.IdleTimeoutS),
+		Flashboot:      flashboot,
+		MinCudaVersion: minCuda,
 	}
 	if existing != nil {
 		epInput.ExistingID = existing.ID
@@ -142,12 +152,13 @@ func Deploy(ctx context.Context, in DeployInput) (*DeployResult, error) {
 	}
 
 	return &DeployResult{
-		EndpointID:   endpointID,
-		EndpointName: name,
-		TemplateID:   templateID,
-		Image:        tool.Image,
-		GPUPool:      pool,
-		Flashboot:    flashboot,
+		EndpointID:     endpointID,
+		EndpointName:   name,
+		TemplateID:     templateID,
+		Image:          tool.Image,
+		GPUPool:        pool,
+		Flashboot:      flashboot,
+		MinCudaVersion: minCuda,
 	}, nil
 }
 
@@ -207,6 +218,9 @@ func PrintDeploy(w io.Writer, r *DeployResult) {
 	fmt.Fprintf(w, "  image:         %s\n", r.Image)
 	fmt.Fprintf(w, "  gpu pool:      %s\n", r.GPUPool)
 	fmt.Fprintf(w, "  flashboot:     %t\n", r.Flashboot)
+	if r.MinCudaVersion != "" {
+		fmt.Fprintf(w, "  min cuda:      %s (driver-pinned)\n", r.MinCudaVersion)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "ready-to-use env line for clients:")
 	fmt.Fprintf(w, "  export RUNPOD_ENDPOINT_ID=%s\n", r.EndpointID)

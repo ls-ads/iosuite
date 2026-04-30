@@ -327,7 +327,8 @@ func cmdEndpointDeploy(args []string) error {
 		// Tri-state flag: --flashboot, --no-flashboot, or unset (use
 		// tool default). Go's flag package only does true booleans;
 		// we model the unset case by walking fs.Visit() after Parse.
-		flashboot = fs.Bool("flashboot", true, "Enable RunPod FlashBoot (snapshot resume) for faster cold starts")
+		flashboot      = fs.Bool("flashboot", true, "Enable RunPod FlashBoot (snapshot resume) for faster cold starts")
+		minCudaVersion = fs.String("min-cuda", "", "Pin workers to RunPod hosts with NVIDIA driver supporting this CUDA version or newer (e.g. 12.8). Empty = use tool default")
 	)
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), `Usage: iosuite endpoint deploy [flags]
@@ -358,14 +359,15 @@ Flags:`)
 		}
 	})
 	in := endpoint.DeployInput{
-		Provider:     *provider,
-		Tool:         *tool,
-		GPUClass:     *gpuClass,
-		Name:         *name,
-		APIKey:       key,
-		WorkersMax:   *workersMax,
-		IdleTimeoutS: *idleTimeout,
-		UserAgent:    fmt.Sprintf("iosuite/%s", version.Version),
+		Provider:       *provider,
+		Tool:           *tool,
+		GPUClass:       *gpuClass,
+		Name:           *name,
+		APIKey:         key,
+		WorkersMax:     *workersMax,
+		IdleTimeoutS:   *idleTimeout,
+		MinCudaVersion: *minCudaVersion,
+		UserAgent:      fmt.Sprintf("iosuite/%s", version.Version),
 	}
 	if flashbootSet {
 		in.Flashboot = flashboot

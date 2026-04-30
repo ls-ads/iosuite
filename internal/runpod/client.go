@@ -282,8 +282,18 @@ type SaveEndpointInput struct {
 	// snapshot rather than re-downloading the image and re-loading the
 	// model. Drops cold-start from ~45 s to ~5 s on the real-esrgan
 	// trt image. Defaults true; pass false explicitly to opt out.
-	Flashboot  bool
-	ExistingID string
+	Flashboot bool
+	// MinCudaVersion forces RunPod to only schedule workers on hosts
+	// whose NVIDIA driver supports the given CUDA version or newer.
+	// Required when the container image bundles a tensorrt / cuda
+	// runtime that demands a specific minimum (the runpod-trt-0.2.1
+	// image bundles tensorrt-cu12 with CUDA 12.8 runtime, so this
+	// must be "12.8"). Empty string = no filter (RunPod schedules
+	// anywhere in the pool). Valid values per RunPod's REST schema:
+	// 11.8, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8,
+	// 12.9, 13.0.
+	MinCudaVersion string
+	ExistingID     string
 }
 
 func (c *Client) SaveEndpoint(ctx context.Context, in SaveEndpointInput) (string, error) {
@@ -308,6 +318,10 @@ func (c *Client) SaveEndpoint(ctx context.Context, in SaveEndpointInput) (string
 	if in.Flashboot {
 		flashBootType = "FLASHBOOT"
 	}
+	cudaField := ""
+	if in.MinCudaVersion != "" {
+		cudaField = fmt.Sprintf(`minCudaVersion: "%s",`, escapeGQL(in.MinCudaVersion))
+	}
 	mutation := fmt.Sprintf(`
 		mutation saveEndpoint {
 			saveEndpoint(input: {
@@ -319,13 +333,14 @@ func (c *Client) SaveEndpoint(ctx context.Context, in SaveEndpointInput) (string
 				workersMax: %d,
 				idleTimeout: %d,
 				flashBootType: %s,
+				%s
 				scalerType: "QUEUE_DELAY",
 				scalerValue: 4,
 				networkVolumeId: ""
 			}) { id }
 		}
 	`, idField, escapeGQL(in.Name), escapeGQL(in.TemplateID), escapeGQL(in.GPUPool),
-		in.WorkersMin, in.WorkersMax, in.IdleTimeoutS, flashBootType)
+		in.WorkersMin, in.WorkersMax, in.IdleTimeoutS, flashBootType, cudaField)
 
 	data, err := c.query(ctx, mutation, nil)
 	if err != nil {
