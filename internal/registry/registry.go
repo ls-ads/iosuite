@@ -48,6 +48,12 @@ var Tools = map[string]Entry{
 		StableVersion: "main",
 		Description:   "Real-ESRGAN 4× image upscaler (TensorRT-accelerated).",
 	},
+	"ffmpeg": {
+		Owner:         "ls-ads",
+		Repo:          "ffmpeg-serve",
+		StableVersion: "main",
+		Description:   "FFmpeg-backed image / video / audio transforms (LGPL FFmpeg + NVENC).",
+	},
 	// Future:
 	//   "whisper":          {Owner: "ls-ads", Repo: "whisper-serve",          StableVersion: "..."},
 	//   "stable-diffusion": {Owner: "ls-ads", Repo: "stable-diffusion-serve", StableVersion: "..."},
