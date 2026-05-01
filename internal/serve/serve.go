@@ -114,11 +114,13 @@ func Run(ctx context.Context, opts Options) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
 	jobHandler := makeJobHandler(opts.Provider)
-	// Both paths point at the same handler — `/runsync` is the
+	// All three paths point at the same handler — `/runsync` is the
 	// RunPod-shaped name (which is what iosuite.io callers use for
-	// drop-in compatibility); `/upscale` is the human-friendly
-	// alias.
+	// drop-in compatibility); `/super-resolution` is the canonical
+	// human-friendly alias; `/upscale` is kept for callers that
+	// learned the legacy path before the rename.
 	mux.HandleFunc("/runsync", jobHandler)
+	mux.HandleFunc("/super-resolution", jobHandler)
 	mux.HandleFunc("/upscale", jobHandler)
 
 	addr := fmt.Sprintf("%s:%d", opts.Bind, opts.Port)

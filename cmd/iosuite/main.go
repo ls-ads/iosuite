@@ -55,20 +55,21 @@ const usage = `iosuite — image / media processing CLI
 Usage:
   iosuite <command> [flags]
 
-Media transforms (mime-aware; same verb works on image / video / audio):
-  upscale       Upscale (real-esrgan AI by default; --method= for lanczos/bicubic/...)
-  compress      Shrink to a size target (Discord/WhatsApp/X presets) or quality target
-  convert       Change format (jpg ↔ webp ↔ avif ↔ ..., mp4 ↔ webm ↔ mov, mp3 ↔ flac ...)
-  reframe       Change aspect ratio (16:9 ↔ 9:16 ↔ 1:1 ...) with blur-pad / letterbox / crop
-  normalize     EBU R128 audio loudness normalization
-  transform     Generic dispatch for any registered transform (escape hatch)
+Tools (mime-aware; the right model is picked from the input):
+  super-resolution  AI super-resolution (Real-ESRGAN; reconstructs detail)
+  resize            Classical resampling (lanczos / bicubic / bilinear / neighbor)
+  compress          Shrink to a size target (Discord/WhatsApp/X presets) or quality target
+  convert           Change format (jpg ↔ webp ↔ avif ..., mp4 ↔ webm ↔ mov, mp3 ↔ flac ...)
+  reframe           Change aspect ratio (16:9 ↔ 9:16 ↔ 1:1 ...) with blur-pad / letterbox / crop
+  normalize         EBU R128 audio loudness normalization
+  transform         Generic dispatch for any registered transform (escape hatch)
 
 Infrastructure:
-  serve         Long-lived HTTP daemon (warm engine; what iosuite.io talks to)
-  endpoint      Manage remote provider endpoints (deploy / list / destroy / benchmark)
-  doctor        Diagnose this host: PATH, Python, GPU, auth keys
-  fetch-model   Download a verified model artefact (forwarded to real-esrgan-serve)
-  version       Print version + commit
+  serve             Long-lived HTTP daemon (warm engine; what iosuite.io talks to)
+  endpoint          Manage remote provider endpoints (deploy / list / destroy / benchmark)
+  doctor            Diagnose this host: PATH, Python, GPU, auth keys
+  fetch-model       Download a verified model artefact (forwarded to real-esrgan-serve)
+  version           Print version + commit
 
 Run 'iosuite <command> --help' for the full flag surface of any command.
 Config: ~/.config/iosuite/config.toml (see ARCHITECTURE.md).`
@@ -90,8 +91,10 @@ func run() error {
 		fmt.Printf("iosuite %s (commit %s)\n", version.Version, version.Commit)
 		return nil
 
-	case "upscale":
-		return cmdUpscale(args)
+	case "super-resolution":
+		return cmdSuperResolution(args)
+	case "resize":
+		return cmdResize(args)
 
 	case "compress":
 		return cmdSugar("compress", args)
@@ -123,84 +126,99 @@ func run() error {
 	}
 }
 
-func cmdUpscale(args []string) error {
-	fs := flag.NewFlagSet("upscale", flag.ExitOnError)
+// cmdSuperResolution runs AI super-resolution via real-esrgan-serve.
+// This is the paid, TensorRT-accelerated path that reconstructs
+// detail rather than just resampling pixels. For fast classical
+// upscaling (lanczos / bicubic / etc) use `iosuite resize`.
+func cmdSuperResolution(args []string) error {
+	fs := flag.NewFlagSet("super-resolution", flag.ExitOnError)
 	var (
 		input      = fs.String("input", "", "Input image file or directory")
 		inputShort = fs.String("i", "", "(alias for --input)")
 		output     = fs.String("output", "", "Output path (auto-derived if omitted)")
 		outShort   = fs.String("o", "", "(alias for --output)")
-		model      = fs.String("model", "", "Model name (default: realesrgan-x4plus); only applies to --method=real-esrgan")
-		provider   = fs.String("provider", "", "local | runpod (defaults from config); only applies to --method=real-esrgan")
-		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU); only applies to --method=real-esrgan")
-		tile       = fs.Bool("tile", false, "Tile-based inference for inputs >1280²; only applies to --method=real-esrgan")
-		jsonEvents = fs.Bool("json-events", false, "Emit JSON progress events on stdout; only applies to --method=real-esrgan")
-		method     = fs.String("method", "real-esrgan", "real-esrgan | lanczos | bicubic | bilinear | neighbor")
-		scale      = fs.Float64("scale", 0, "Upscale factor (default 4 for AI, 4 for resampling). Resampling only.")
-		runtimeBin = fs.String("runtime", "", "Override path to the *-serve binary (real-esrgan-serve OR ffmpeg-serve depending on --method)")
+		model      = fs.String("model", "", "Model name (default: realesrgan-x4plus)")
+		provider   = fs.String("provider", "", "local | runpod (defaults from config)")
+		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU)")
+		tile       = fs.Bool("tile", false, "Tile-based inference for inputs >1280²")
+		jsonEvents = fs.Bool("json-events", false, "Emit JSON progress events on stdout")
+		runtimeBin = fs.String("runtime", "", "Override path to the real-esrgan-serve binary")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), `Usage: iosuite upscale [flags] [path]
+		fmt.Fprintln(fs.Output(), `Usage: iosuite super-resolution [flags] [path]
 
-Upscale an image. Two engines:
-
-  --method=real-esrgan  (default)  AI super-resolution (TensorRT-
-                                   accelerated). 4× only. Subprocesses
-                                   real-esrgan-serve.
-  --method=lanczos|bicubic|bilinear|neighbor
-                                   Classical resampling. CPU-only,
-                                   fast, deterministic. Free tier on
-                                   iosuite.io. Subprocesses
-                                   ffmpeg-serve. neighbor is for
-                                   pixel-art.
+AI super-resolution via Real-ESRGAN (TensorRT-accelerated). 4× only.
+Reconstructs missing detail rather than just resampling — costs
+credits, runs on a GPU. For fast classical upscaling (lanczos /
+bicubic / nearest-neighbor), use 'iosuite resize'.
 
 Flags:`)
 		fs.PrintDefaults()
 	}
 	pos := parseInterspersed(fs, args)
 
-	// Positional <path> is the same as --input. Sugar for the common case.
 	in := first(*input, *inputShort)
 	if in == "" {
 		in = pos
 	}
-	out := first(*output, *outShort)
-
-	switch *method {
-	case "", "real-esrgan":
-		cfg, err := config.Load()
-		if err != nil {
-			return err
-		}
-		return upscale.Run(context.Background(), cfg, upscale.Options{
-			Input:      in,
-			Output:     out,
-			Model:      *model,
-			Provider:   *provider,
-			GPUID:      *gpuID,
-			Tile:       *tile,
-			JSONEvents: *jsonEvents,
-			RuntimeBin: *runtimeBin,
-		})
-	case "lanczos", "bicubic", "bilinear", "neighbor":
-		s := *scale
-		if s == 0 {
-			s = 4
-		}
-		params := map[string]any{
-			"method": *method,
-			"scale":  s,
-		}
-		return transform.Run(context.Background(), transform.Options{
-			Name:       "upscale",
-			Input:      in,
-			Output:     out,
-			Params:     params,
-			RuntimeBin: *runtimeBin,
-		})
-	default:
-		return fmt.Errorf("unknown --method %q (expected real-esrgan | lanczos | bicubic | bilinear | neighbor)", *method)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
 	}
+	return upscale.Run(context.Background(), cfg, upscale.Options{
+		Input:      in,
+		Output:     first(*output, *outShort),
+		Model:      *model,
+		Provider:   *provider,
+		GPUID:      *gpuID,
+		Tile:       *tile,
+		JSONEvents: *jsonEvents,
+		RuntimeBin: *runtimeBin,
+	})
+}
+
+// cmdResize runs classical resampling via ffmpeg-serve. Free tier on
+// iosuite.io; CPU-only, deterministic. Default kernel is lanczos
+// (best general-purpose); --method picks bicubic / bilinear /
+// neighbor (the last is for pixel-art).
+func cmdResize(args []string) error {
+	fs := flag.NewFlagSet("resize", flag.ExitOnError)
+	var (
+		input      = fs.String("input", "", "Input file path")
+		inputShort = fs.String("i", "", "(alias for --input)")
+		output     = fs.String("output", "", "Output path (auto-derived if omitted)")
+		outShort   = fs.String("o", "", "(alias for --output)")
+		method     = fs.String("method", "lanczos", "lanczos | bicubic | bilinear | neighbor")
+		scale      = fs.Float64("scale", 4, "Scale factor on each axis (0.1–16). Values <1 downscale.")
+		runtimeBin = fs.String("runtime", "", "Override path to the ffmpeg-serve binary")
+	)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `Usage: iosuite resize [flags] [path]
+
+Classical resize via ffmpeg-serve — fast, deterministic, CPU-only.
+Default kernel is lanczos (best general-purpose). Use --method=neighbor
+for pixel art. Audio inputs are rejected.
+
+Flags:`)
+		fs.PrintDefaults()
+	}
+	pos := parseInterspersed(fs, args)
+
+	in := first(*input, *inputShort)
+	if in == "" {
+		in = pos
+	}
+	params := map[string]any{
+		"method": *method,
+		"scale":  *scale,
+	}
+	return transform.Run(context.Background(), transform.Options{
+		Name:       "resize",
+		Input:      in,
+		Output:     first(*output, *outShort),
+		Params:     params,
+		RuntimeBin: *runtimeBin,
+	})
 }
 
 func cmdDoctor(args []string) error {

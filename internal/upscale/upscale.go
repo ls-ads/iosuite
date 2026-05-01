@@ -1,4 +1,6 @@
-// Package upscale implements `iosuite upscale` — the headline command.
+// Package upscale implements `iosuite super-resolution` — the AI
+// super-resolution command (legacy package name kept to avoid churn;
+// the CLI verb is `super-resolution`).
 //
 // All actual GPU work happens in `real-esrgan-serve`; this file just
 // resolves flags, derives output paths, and subprocesses that binary
@@ -52,7 +54,7 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 		provider = cfg.Provider
 	}
 	if provider != "local" {
-		return fmt.Errorf("`iosuite upscale` is local-only (got --provider %q). For remote inference, run `iosuite serve --provider runpod` and POST to the daemon.", provider)
+		return fmt.Errorf("`iosuite super-resolution` is local-only (got --provider %q). For remote inference, run `iosuite serve --provider runpod` and POST to the daemon.", provider)
 	}
 
 	bin, err := runtime.LocateRealEsrganServe(opts.RuntimeBin)
@@ -71,7 +73,7 @@ func Run(ctx context.Context, cfg config.Config, opts Options) error {
 	}
 
 	args := []string{
-		"upscale",
+		"super-resolution",
 		"--input", opts.Input,
 		"--output", output,
 		"--model", model,
