@@ -1,89 +1,174 @@
 # iosuite
 
-The user-facing CLI for the iosuite ecosystem. Drives image (and future
-video / audio) processing through the same `real-esrgan-serve`
-ecosystem the [iosuite.io](https://iosuite.io) web service uses
-internally — local GPU, RunPod serverless, or a remote `serve` daemon,
-all through one command.
+User-facing CLI for the iosuite ecosystem. One Go binary that
+upscales an image locally on your GPU, runs a long-lived daemon for
+hot-path workloads, manages serverless endpoints on RunPod, and
+benchmarks them against the workload each tool publishes.
 
 ```
-$ iosuite upscale cat.jpg
+$ iosuite upscale --input cat.jpg
 → cat.jpg
   ✓ cat_4x.jpg (4096×3072)
 ```
 
-That's the whole experience. Auto-derived output name, sticky config,
-no flags required.
+CGO-free, cross-compiles cleanly, single static binary.
 
 ## Install
 
+Build from source (Go 1.25+):
+
 ```bash
-go install iosuite.io/cmd/iosuite@latest
-# or download a release tarball
-curl -sSL https://raw.githubusercontent.com/ls-ads/iosuite/main/scripts/install.sh | bash
+git clone https://github.com/ls-ads/iosuite
+cd iosuite
+make install
+# installs to /usr/local/bin/iosuite
 ```
 
-The CLI subprocesses to `real-esrgan-serve` for the actual GPU work.
-`iosuite doctor` will tell you whether it's on your PATH and how to
-install it if not.
+Or grab a binary from
+[GitHub releases](https://github.com/ls-ads/iosuite/releases) and put
+it on your PATH.
+
+For local upscale you also need `real-esrgan-serve` on PATH (or pass
+`--runtime <path>`). For RunPod-only flows
+(`iosuite serve --provider runpod`, `iosuite endpoint *`) the CLI has
+no other dependencies.
 
 ## Quick start
 
 ```bash
-# Probe the host: confirm real-esrgan-serve, Python, GPU, etc.
+# Probe the host: real-esrgan-serve, Python, RunPod creds.
 iosuite doctor
 
-# One-shot upscale (local subprocess to real-esrgan-serve)
-iosuite upscale photo.jpg
+# Single image, local GPU.
+iosuite upscale --input photo.jpg
+# → photo_4x.jpg
 
-# A whole directory at once
-iosuite upscale ~/photos -o ~/photos_4x
+# Tile mode for inputs >1280² (slices, infers per tile, stitches).
+iosuite upscale --input large.png --tile
+
+# JSON progress events for piping into other tools.
+iosuite upscale --input photo.jpg --json-events
 ```
+
+Output is always 4× input on each axis (Real-ESRGAN
+`realesrgan-x4plus`). Override the model with `--model` once
+additional variants ship.
 
 ## Subcommands
 
-| Command                | Purpose                                                       |
-|------------------------|---------------------------------------------------------------|
-| `iosuite upscale`      | Run Real-ESRGAN inference. Subprocesses `real-esrgan-serve`. |
-| `iosuite doctor`       | Diagnose the host: PATH, Python, ORT, GPU, auth keys.        |
-| `iosuite fetch-model`  | Pull a verified model artefact from `real-esrgan-serve`.     |
-| `iosuite version`      | Print version + build commit.                                |
+| Command                       | What it does                                                       |
+|-------------------------------|--------------------------------------------------------------------|
+| `iosuite upscale`             | One-shot inference. Subprocesses `real-esrgan-serve`.              |
+| `iosuite serve`               | Long-lived HTTP daemon (`local` or `runpod` provider).             |
+| `iosuite endpoint deploy`     | Create / update a RunPod serverless endpoint from a manifest.      |
+| `iosuite endpoint list`       | List endpoints on the configured RunPod account.                   |
+| `iosuite endpoint destroy`    | Delete an endpoint by id or name.                                  |
+| `iosuite endpoint benchmark`  | Run the tool's published benchmark suite against an endpoint.      |
+| `iosuite doctor`              | Diagnose the host: PATH, Python, GPU, RunPod credentials.          |
+| `iosuite fetch-model`         | Pull a verified model artefact (forwarded to `real-esrgan-serve`). |
+| `iosuite version`             | Print version + build commit.                                      |
 
-Run `iosuite <cmd> --help` for the full flag surface.
+`iosuite <cmd> --help` prints the full flag surface for any command.
 
-## Config
+## Daemon mode
 
-`~/.config/iosuite/config.toml`:
+`iosuite serve` exposes a stable JSON API regardless of which backend
+runs the inference:
+
+```bash
+# Local: spawns a real-esrgan-serve subprocess on :8311.
+iosuite serve --provider local --bind 0.0.0.0 --port 8312
+
+# RunPod: forwards each request to api.runpod.ai/v2/<id>/runsync,
+# falls back to /status polling for cold queues.
+iosuite serve --provider runpod \
+  --endpoint-id <id> \
+  --runpod-api-key <key>
+```
+
+Wire shape (RunPod-compatible — same envelope both providers see):
+
+```
+POST /runsync   Content-Type: application/json
+{"input": {"images": [{"image_base64": "..."}],
+           "tile": true, "output_format": "jpg"}}
+
+→ {"status": "COMPLETED",
+   "output": {"outputs": [{"image_base64": "...", "exec_ms": 612}]}}
+```
+
+`/upscale` is an alias of `/runsync`. `GET /health` returns
+`{"status":"ok"}` once the backend is reachable.
+
+## Endpoint management
+
+Per-tool deploy specs (image tag, container disk, GPU pool map,
+FlashBoot default, CUDA pin) live in each `*-serve` repo's
+`deploy/runpod.json` manifest. iosuite reads the manifest at deploy
+time — adding a new tool is a manifest, not an iosuite release.
+
+```bash
+# Deploy / update — idempotent. Resolves the manifest from the
+# *-serve repo at the registered stable git tag.
+iosuite endpoint deploy --tool real-esrgan --gpu-class rtx-4090
+
+# Pin to a specific *-serve git tag.
+iosuite endpoint deploy --tool real-esrgan \
+  --version runpod-trt-0.2.2 --gpu-class rtx-4090
+
+# Override defaults from the manifest.
+iosuite endpoint deploy --tool real-esrgan --gpu-class rtx-4090 \
+  --workers-max 3 --idle-timeout 30 --min-cuda 12.8
+
+# List + destroy.
+iosuite endpoint list
+iosuite endpoint destroy <id>
+iosuite endpoint destroy --name real-esrgan-rtx-4090
+```
+
+## Benchmark
+
+Each tool publishes a `deploy/benchmark.json` manifest declaring the
+workload (warmup count, measure count, request shape, metrics).
+iosuite owns the wire — POST loop, timing, percentile aggregation,
+table formatting.
+
+```bash
+iosuite endpoint benchmark --tool real-esrgan --endpoint-id <id>
+# benchmark: tool=real-esrgan endpoint=<id> warmup=3 measure=10
+# manifest:  https://raw.githubusercontent.com/ls-ads/real-esrgan-serve/main/deploy/benchmark.json
+#
+#   p50_latency_ms   p50 = 19.0
+#   p95_latency_ms   p95 = 19.0
+#   p99_latency_ms   p99 = 19.0
+#   mean_latency_ms  mean = 18.2
+```
+
+## Configuration
+
+`~/.config/iosuite/config.toml` (honours `$XDG_CONFIG_HOME`):
 
 ```toml
 [default]
-provider = "local"
-model    = "realesrgan-x4plus"
+provider   = "local"             # local | runpod
+output_dir = ""                  # empty = alongside input
+model      = "realesrgan-x4plus"
 
 [runpod]
-# api_key / endpoint_id fall back to RUNPOD_API_KEY / RUNPOD_ENDPOINT_ID
-# in env if you'd rather not commit them to a config file.
+api_key     = ""                 # also honours $RUNPOD_API_KEY
+endpoint_id = ""                 # also honours $RUNPOD_ENDPOINT_ID
 ```
 
-Precedence: command-line flag > environment variable > config file >
-built-in defaults.
+Resolution order (highest wins): command-line flag → environment
+variable → config file → built-in default.
 
-## What's coming
+## Documentation
 
-`iosuite serve` (long-lived daemon for hot-path), `iosuite benchmark`
-(throughput + cost-per-job report), and `iosuite endpoint deploy`
-(provision a RunPod / vast.ai / Modal endpoint with one command). All
-documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
-
-## Migration from the legacy CLI
-
-The pre-rebuild iosuite (CGO + Python/Node bindings, separate
-`ioimg`/`iovid` binaries) is preserved on the `legacy-cgo` branch and
-the `legacy-final-2026-04-30` tag. The new shape — single binary, no
-CGO, no embedded weights — drops the install matrix and license-tangled
-NVIDIA containers; that's why the rewrite happened.
+- Full CLI reference: <https://iosuite.io/cli-docs>
+- Architecture and the interface/implementation split:
+  [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+- Worker module: [real-esrgan-serve](https://github.com/ls-ads/real-esrgan-serve)
 
 ## License
 
-Apache-2.0. See [`LICENSE`](./LICENSE) for the full text and
-`ARCHITECTURE.md` for the design rationale.
+Apache-2.0. See [`LICENSE`](./LICENSE).
