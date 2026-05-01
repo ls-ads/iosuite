@@ -28,20 +28,32 @@ const BinaryName = "real-esrgan-serve"
 // real-esrgan-serve binary that should be invoked, or an error with a
 // human-readable explanation of where it tried to look.
 func LocateRealEsrganServe(override string) (string, error) {
+	return locate("real-esrgan-serve", "REAL_ESRGAN_SERVE_BIN", override,
+		"https://github.com/ls-ads/real-esrgan-serve/releases")
+}
+
+// LocateFFmpegServe returns the absolute path of the ffmpeg-serve
+// binary. Same lookup order as LocateRealEsrganServe.
+func LocateFFmpegServe(override string) (string, error) {
+	return locate("ffmpeg-serve", "FFMPEG_SERVE_BIN", override,
+		"https://github.com/ls-ads/ffmpeg-serve/releases")
+}
+
+func locate(name, envVar, override, installURL string) (string, error) {
 	candidates := []string{}
 	if override != "" {
 		candidates = append(candidates, override)
 	}
-	if env := os.Getenv("REAL_ESRGAN_SERVE_BIN"); env != "" {
+	if env := os.Getenv(envVar); env != "" {
 		candidates = append(candidates, env)
 	}
 
-	if path, err := exec.LookPath(BinaryName); err == nil {
+	if path, err := exec.LookPath(name); err == nil {
 		candidates = append(candidates, path)
 	}
 
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), BinaryName))
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), name))
 	}
 
 	for _, c := range candidates {
@@ -58,9 +70,9 @@ func LocateRealEsrganServe(override string) (string, error) {
 
 	return "", fmt.Errorf(
 		"%s not found. Looked at: %v.\n"+
-			"Install: https://github.com/ls-ads/real-esrgan-serve/releases\n"+
-			"Or set $REAL_ESRGAN_SERVE_BIN to the absolute path.",
-		BinaryName, candidates,
+			"Install: %s\n"+
+			"Or set $%s to the absolute path.",
+		name, candidates, installURL, envVar,
 	)
 }
 

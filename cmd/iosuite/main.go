@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -35,6 +36,7 @@ import (
 	"iosuite.io/internal/registry"
 	"iosuite.io/internal/runtime"
 	"iosuite.io/internal/serve"
+	"iosuite.io/internal/transform"
 	"iosuite.io/internal/upscale"
 	"iosuite.io/internal/version"
 )
@@ -53,10 +55,17 @@ const usage = `iosuite — image / media processing CLI
 Usage:
   iosuite <command> [flags]
 
-Commands:
-  upscale       Upscale an image or directory (subprocesses real-esrgan-serve)
+Media transforms (mime-aware; same verb works on image / video / audio):
+  upscale       Upscale (real-esrgan AI by default; --method= for lanczos/bicubic/...)
+  compress      Shrink to a size target (Discord/WhatsApp/X presets) or quality target
+  convert       Change format (jpg ↔ webp ↔ avif ↔ ..., mp4 ↔ webm ↔ mov, mp3 ↔ flac ...)
+  reframe       Change aspect ratio (16:9 ↔ 9:16 ↔ 1:1 ...) with blur-pad / letterbox / crop
+  normalize     EBU R128 audio loudness normalization
+  transform     Generic dispatch for any registered transform (escape hatch)
+
+Infrastructure:
   serve         Long-lived HTTP daemon (warm engine; what iosuite.io talks to)
-  endpoint      Manage remote provider endpoints (deploy / list / destroy)
+  endpoint      Manage remote provider endpoints (deploy / list / destroy / benchmark)
   doctor        Diagnose this host: PATH, Python, GPU, auth keys
   fetch-model   Download a verified model artefact (forwarded to real-esrgan-serve)
   version       Print version + commit
@@ -84,6 +93,17 @@ func run() error {
 	case "upscale":
 		return cmdUpscale(args)
 
+	case "compress":
+		return cmdSugar("compress", args)
+	case "convert":
+		return cmdSugar("convert", args)
+	case "reframe":
+		return cmdSugar("reframe", args)
+	case "normalize":
+		return cmdSugar("normalize", args)
+	case "transform":
+		return cmdTransform(args)
+
 	case "serve":
 		return cmdServe(args)
 
@@ -108,46 +128,79 @@ func cmdUpscale(args []string) error {
 	var (
 		input      = fs.String("input", "", "Input image file or directory")
 		inputShort = fs.String("i", "", "(alias for --input)")
-		output     = fs.String("output", "", "Output path (auto-derived as <stem>_4x.<ext> if omitted)")
+		output     = fs.String("output", "", "Output path (auto-derived if omitted)")
 		outShort   = fs.String("o", "", "(alias for --output)")
-		model      = fs.String("model", "", "Model name (default: realesrgan-x4plus)")
-		provider   = fs.String("provider", "", "local | runpod | serve (defaults from config)")
-		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU)")
-		tile       = fs.Bool("tile", false, "Tile-based inference for inputs >1280²")
-		jsonEvents = fs.Bool("json-events", false, "Emit JSON progress events on stdout")
-		runtimeBin = fs.String("runtime", "", "Override path to the real-esrgan-serve binary")
+		model      = fs.String("model", "", "Model name (default: realesrgan-x4plus); only applies to --method=real-esrgan")
+		provider   = fs.String("provider", "", "local | runpod (defaults from config); only applies to --method=real-esrgan")
+		gpuID      = fs.Int("gpu-id", 0, "GPU device index (-1 = CPU); only applies to --method=real-esrgan")
+		tile       = fs.Bool("tile", false, "Tile-based inference for inputs >1280²; only applies to --method=real-esrgan")
+		jsonEvents = fs.Bool("json-events", false, "Emit JSON progress events on stdout; only applies to --method=real-esrgan")
+		method     = fs.String("method", "real-esrgan", "real-esrgan | lanczos | bicubic | bilinear | neighbor")
+		scale      = fs.Float64("scale", 0, "Upscale factor (default 4 for AI, 4 for resampling). Resampling only.")
+		runtimeBin = fs.String("runtime", "", "Override path to the *-serve binary (real-esrgan-serve OR ffmpeg-serve depending on --method)")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), `Usage: iosuite upscale [flags]
+		fmt.Fprintln(fs.Output(), `Usage: iosuite upscale [flags] [path]
 
-Run Real-ESRGAN inference. Subprocesses real-esrgan-serve, which
-must be on PATH (or supplied via --runtime).
+Upscale an image. Two engines:
+
+  --method=real-esrgan  (default)  AI super-resolution (TensorRT-
+                                   accelerated). 4× only. Subprocesses
+                                   real-esrgan-serve.
+  --method=lanczos|bicubic|bilinear|neighbor
+                                   Classical resampling. CPU-only,
+                                   fast, deterministic. Free tier on
+                                   iosuite.io. Subprocesses
+                                   ffmpeg-serve. neighbor is for
+                                   pixel-art.
 
 Flags:`)
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+	pos := parseInterspersed(fs, args)
 
+	// Positional <path> is the same as --input. Sugar for the common case.
 	in := first(*input, *inputShort)
+	if in == "" {
+		in = pos
+	}
 	out := first(*output, *outShort)
 
-	cfg, err := config.Load()
-	if err != nil {
-		return err
+	switch *method {
+	case "", "real-esrgan":
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		return upscale.Run(context.Background(), cfg, upscale.Options{
+			Input:      in,
+			Output:     out,
+			Model:      *model,
+			Provider:   *provider,
+			GPUID:      *gpuID,
+			Tile:       *tile,
+			JSONEvents: *jsonEvents,
+			RuntimeBin: *runtimeBin,
+		})
+	case "lanczos", "bicubic", "bilinear", "neighbor":
+		s := *scale
+		if s == 0 {
+			s = 4
+		}
+		params := map[string]any{
+			"method": *method,
+			"scale":  s,
+		}
+		return transform.Run(context.Background(), transform.Options{
+			Name:       "upscale",
+			Input:      in,
+			Output:     out,
+			Params:     params,
+			RuntimeBin: *runtimeBin,
+		})
+	default:
+		return fmt.Errorf("unknown --method %q (expected real-esrgan | lanczos | bicubic | bilinear | neighbor)", *method)
 	}
-
-	return upscale.Run(context.Background(), cfg, upscale.Options{
-		Input:      in,
-		Output:     out,
-		Model:      *model,
-		Provider:   *provider,
-		GPUID:      *gpuID,
-		Tile:       *tile,
-		JSONEvents: *jsonEvents,
-		RuntimeBin: *runtimeBin,
-	})
 }
 
 func cmdDoctor(args []string) error {
@@ -642,6 +695,220 @@ func cmdFetchModel(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// cmdTransform runs an arbitrary transform — the escape hatch when
+// the user wants something the sugar verbs don't cover, or wants
+// to drive a future transform from the CLI immediately without
+// waiting for sugar.
+//
+//   iosuite transform <name> [--input PATH] [--output PATH] [--params JSON]
+//
+// Positional first arg can also be the input path.
+func cmdTransform(args []string) error {
+	if len(args) == 0 {
+		fmt.Println(`Usage: iosuite transform <name> [path] [flags]
+
+Run any registered ffmpeg-serve transform. Sugar verbs (compress,
+convert, reframe, normalize) cover the common cases without the
+--params dance.
+
+Flags:
+  -i, --input string    Input file path (or pass as positional)
+  -o, --output string   Output file path (auto-derived if omitted)
+      --params string   Transform-specific params as JSON (default "{}")
+      --runtime string  Override ffmpeg-serve binary path`)
+		return nil
+	}
+	name := args[0]
+	rest := args[1:]
+
+	fs := flag.NewFlagSet("transform "+name, flag.ExitOnError)
+	var (
+		input      = fs.String("input", "", "Input file path")
+		inputShort = fs.String("i", "", "(alias for --input)")
+		output     = fs.String("output", "", "Output file path (auto-derived if omitted)")
+		outShort   = fs.String("o", "", "(alias for --output)")
+		paramsJSON = fs.String("params", "{}", "Transform-specific params as a JSON object")
+		runtimeBin = fs.String("runtime", "", "Override path to the ffmpeg-serve binary")
+	)
+	pos := parseInterspersed(fs, rest)
+	in := first(*input, *inputShort)
+	if in == "" {
+		in = pos
+	}
+
+	var params map[string]any
+	if err := json.Unmarshal([]byte(*paramsJSON), &params); err != nil {
+		return fmt.Errorf("--params: %w", err)
+	}
+
+	return transform.Run(context.Background(), transform.Options{
+		Name:       name,
+		Input:      in,
+		Output:     first(*output, *outShort),
+		Params:     params,
+		RuntimeBin: *runtimeBin,
+	})
+}
+
+// cmdSugar implements the mime-aware sugar verbs (compress, convert,
+// reframe, normalize). Each verb's flag surface is small + verb-
+// specific, so we map flags → params here rather than sharing one
+// flag set.
+func cmdSugar(verb string, args []string) error {
+	fs := flag.NewFlagSet(verb, flag.ExitOnError)
+	var (
+		input      = fs.String("input", "", "Input file path")
+		inputShort = fs.String("i", "", "(alias for --input)")
+		output     = fs.String("output", "", "Output file path (auto-derived if omitted)")
+		outShort   = fs.String("o", "", "(alias for --output)")
+		runtimeBin = fs.String("runtime", "", "Override path to the ffmpeg-serve binary")
+	)
+
+	// Verb-specific flags that map into the params bag.
+	var (
+		// compress
+		target   *string
+		sizeMB   *float64
+		quality  *int
+		bitrate  *int
+		fmtFlag  *string
+		// reframe
+		toAspect *string
+		fit      *string
+		// convert
+		toFormat *string
+		// normalize
+		targetLUFS *float64
+		lra        *float64
+		truePeak   *float64
+	)
+	switch verb {
+	case "compress":
+		target = fs.String("target", "", "Preset: discord (10 MB) | whatsapp (16 MB) | x | twitter")
+		sizeMB = fs.Float64("size-mb", 0, "Video target file size in MB (overrides --target)")
+		quality = fs.Int("quality", 0, "Image quality 1-100 (default 75)")
+		bitrate = fs.Int("bitrate-kbps", 0, "Audio bitrate kbps 32-320 (default 128)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "reframe":
+		toAspect = fs.String("to", "", "Target aspect ratio, \"W:H\" — e.g., 9:16, 1:1, 16:9 (required)")
+		fit = fs.String("fit", "", "blur-pad (default) | letterbox | crop | stretch")
+	case "convert":
+		toFormat = fs.String("to", "", "Target format — e.g., webp, mp4, gif, opus (required)")
+	case "normalize":
+		targetLUFS = fs.Float64("target-lufs", 0, "Integrated loudness target, LUFS (default -16)")
+		lra = fs.Float64("lra", 0, "Loudness range, dB (default 11)")
+		truePeak = fs.Float64("true-peak", 0, "True-peak ceiling, dBTP (default -1.5)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	}
+
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(),
+			"Usage: iosuite %s [flags] [path]\n\n", verb)
+		switch verb {
+		case "compress":
+			fmt.Fprintln(fs.Output(),
+				"Shrink image / video / audio. Mime-aware: same verb, three behaviours.")
+		case "convert":
+			fmt.Fprintln(fs.Output(),
+				"Change format. Image / video / audio; --to is required.")
+		case "reframe":
+			fmt.Fprintln(fs.Output(),
+				"Change aspect ratio of image or video. --to is required (e.g. 9:16).")
+		case "normalize":
+			fmt.Fprintln(fs.Output(),
+				"EBU R128 audio loudness normalization. Audio or audio-track-of-video.")
+		}
+		fmt.Fprintln(fs.Output())
+		fmt.Fprintln(fs.Output(), "Flags:")
+		fs.PrintDefaults()
+	}
+	pos := parseInterspersed(fs, args)
+
+	in := first(*input, *inputShort)
+	if in == "" {
+		in = pos
+	}
+	if in == "" {
+		return fmt.Errorf("%s: input file is required (positional or --input)", verb)
+	}
+
+	params := map[string]any{}
+	switch verb {
+	case "compress":
+		if *target != "" {
+			params["target"] = *target
+		}
+		if *sizeMB > 0 {
+			params["size_mb"] = *sizeMB
+		}
+		if *quality > 0 {
+			params["quality"] = *quality
+		}
+		if *bitrate > 0 {
+			params["bitrate_kbps"] = *bitrate
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "reframe":
+		if *toAspect == "" {
+			return fmt.Errorf("reframe: --to is required (e.g. --to=9:16)")
+		}
+		params["to"] = *toAspect
+		if *fit != "" {
+			params["fit"] = *fit
+		}
+	case "convert":
+		if *toFormat == "" {
+			return fmt.Errorf("convert: --to is required (e.g. --to=webp)")
+		}
+		params["to"] = *toFormat
+	case "normalize":
+		if *targetLUFS != 0 {
+			params["target_lufs"] = *targetLUFS
+		}
+		if *lra != 0 {
+			params["lra"] = *lra
+		}
+		if *truePeak != 0 {
+			params["true_peak"] = *truePeak
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	}
+
+	return transform.Run(context.Background(), transform.Options{
+		Name:       verb,
+		Input:      in,
+		Output:     first(*output, *outShort),
+		Params:     params,
+		RuntimeBin: *runtimeBin,
+	})
+}
+
+// parseInterspersed handles a positional input path appearing BEFORE
+// the flags ("iosuite reframe sample.jpg --to=9:16"). Stdlib flag
+// stops at the first non-flag, so we parse twice: once to consume any
+// leading flags, then if the remainder starts with a non-flag, peel
+// it off as the positional and re-parse the trailing flags.
+//
+// Returns the positional (or "") + nil error iff parsing succeeded.
+// fs.ExitOnError is honoured by both Parse calls — on a real flag
+// error the runtime exits before we return.
+func parseInterspersed(fs *flag.FlagSet, args []string) string {
+	_ = fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		return ""
+	}
+	positional := rest[0]
+	if len(rest) > 1 {
+		_ = fs.Parse(rest[1:])
+	}
+	return positional
 }
 
 // first returns the leftmost non-empty string. Used to combine long
