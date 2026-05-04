@@ -62,6 +62,10 @@ Tools (mime-aware; the right model is picked from the input):
   convert           Change format (jpg ↔ webp ↔ avif ..., mp4 ↔ webm ↔ mov, mp3 ↔ flac ...)
   reframe           Change aspect ratio (16:9 ↔ 9:16 ↔ 1:1 ...) with blur-pad / letterbox / crop
   normalize         EBU R128 audio loudness normalization
+  trim              Cut a span from video / audio (--start, --end, optional copy mode)
+  speed             Change playback rate of video / audio (0.25× – 4×; pitch preserved)
+  extract-audio     Pull the audio track out of a video into mp3 / wav / flac / m4a / ogg / opus
+  silence-remove    Strip silent gaps from video / audio (configurable threshold + min-duration)
   transform         Generic dispatch for any registered transform (escape hatch)
 
 Infrastructure:
@@ -104,6 +108,14 @@ func run() error {
 		return cmdSugar("reframe", args)
 	case "normalize":
 		return cmdSugar("normalize", args)
+	case "trim":
+		return cmdSugar("trim", args)
+	case "speed":
+		return cmdSugar("speed", args)
+	case "extract-audio":
+		return cmdSugar("extract-audio", args)
+	case "silence-remove":
+		return cmdSugar("silence-remove", args)
 	case "transform":
 		return cmdTransform(args)
 
@@ -801,6 +813,15 @@ func cmdSugar(verb string, args []string) error {
 		targetLUFS *float64
 		lra        *float64
 		truePeak   *float64
+		// trim
+		startSec  *float64
+		endSec    *float64
+		trimMode  *string
+		// speed
+		speedFactor *float64
+		// silence-remove
+		thresholdDB   *float64
+		minSilenceSec *float64
 	)
 	switch verb {
 	case "compress":
@@ -818,6 +839,20 @@ func cmdSugar(verb string, args []string) error {
 		targetLUFS = fs.Float64("target-lufs", 0, "Integrated loudness target, LUFS (default -16)")
 		lra = fs.Float64("lra", 0, "Loudness range, dB (default 11)")
 		truePeak = fs.Float64("true-peak", 0, "True-peak ceiling, dBTP (default -1.5)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "trim":
+		startSec = fs.Float64("start", 0, "Start timestamp in seconds (default 0)")
+		endSec = fs.Float64("end", 0, "End timestamp in seconds (default end of file)")
+		trimMode = fs.String("mode", "", "encode (default; frame-accurate) | copy (fast; keyframe-snap)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "speed":
+		speedFactor = fs.Float64("factor", 0, "Playback multiplier — 2.0 = 2× faster, 0.5 = half-speed (required, range 0.25-4.0)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "extract-audio":
+		toFormat = fs.String("to", "mp3", "Target audio format — mp3 | wav | flac | m4a | ogg | opus")
+	case "silence-remove":
+		thresholdDB = fs.Float64("threshold-db", 0, "Silence cutoff in dBFS (default -50; quieter studios use -60)")
+		minSilenceSec = fs.Float64("min-silence-sec", 0, "Minimum gap duration to remove, seconds (default 0.5)")
 		fmtFlag = fs.String("format", "", "Output container format")
 	}
 
@@ -837,6 +872,18 @@ func cmdSugar(verb string, args []string) error {
 		case "normalize":
 			fmt.Fprintln(fs.Output(),
 				"EBU R128 audio loudness normalization. Audio or audio-track-of-video.")
+		case "trim":
+			fmt.Fprintln(fs.Output(),
+				"Cut a span from video / audio. At least one of --start or --end is required.")
+		case "speed":
+			fmt.Fprintln(fs.Output(),
+				"Change playback rate of video / audio. Pitch is preserved (atempo).")
+		case "extract-audio":
+			fmt.Fprintln(fs.Output(),
+				"Pull the audio track out of a video. --to picks the audio container.")
+		case "silence-remove":
+			fmt.Fprintln(fs.Output(),
+				"Strip silent gaps from video / audio. Tunable threshold + min duration.")
 		}
 		fmt.Fprintln(fs.Output())
 		fmt.Fprintln(fs.Output(), "Flags:")
@@ -892,6 +939,44 @@ func cmdSugar(verb string, args []string) error {
 		}
 		if *truePeak != 0 {
 			params["true_peak"] = *truePeak
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "trim":
+		if *startSec > 0 {
+			params["start_sec"] = *startSec
+		}
+		if *endSec > 0 {
+			params["end_sec"] = *endSec
+		}
+		if *trimMode != "" {
+			params["mode"] = *trimMode
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+		if *startSec == 0 && *endSec == 0 {
+			return fmt.Errorf("trim: at least one of --start or --end is required")
+		}
+	case "speed":
+		if *speedFactor == 0 {
+			return fmt.Errorf("speed: --factor is required (e.g. --factor=2.0)")
+		}
+		params["factor"] = *speedFactor
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "extract-audio":
+		if *toFormat != "" {
+			params["format"] = *toFormat
+		}
+	case "silence-remove":
+		if *thresholdDB != 0 {
+			params["threshold_db"] = *thresholdDB
+		}
+		if *minSilenceSec != 0 {
+			params["min_silence_sec"] = *minSilenceSec
 		}
 		if *fmtFlag != "" {
 			params["format"] = *fmtFlag
