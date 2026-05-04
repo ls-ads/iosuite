@@ -31,6 +31,11 @@ type Options struct {
 	Input  string
 	Output string         // empty = ffmpeg-serve auto-derives
 	Params map[string]any // transform-specific knobs
+	// Aux holds paths to optional secondary input files —
+	// subtitle-burn takes an SRT, watermark takes an overlay
+	// image, color-lut takes a .cube file. Order is preserved;
+	// each entry becomes a `--aux <path>` flag on the subprocess.
+	Aux []string
 
 	// Override path to the ffmpeg-serve binary. Empty = use the
 	// standard locate flow (PATH / env / sibling-binary).
@@ -67,6 +72,9 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("encode params: %w", err)
 		}
 		args = append(args, "--params", string(raw))
+	}
+	for _, ap := range opts.Aux {
+		args = append(args, "--aux", ap)
 	}
 
 	// Trap signals so Ctrl-C kills the child too. Without this the

@@ -66,6 +66,10 @@ Tools (mime-aware; the right model is picked from the input):
   speed             Change playback rate of video / audio (0.25× – 4×; pitch preserved)
   extract-audio     Pull the audio track out of a video into mp3 / wav / flac / m4a / ogg / opus
   silence-remove    Strip silent gaps from video / audio (configurable threshold + min-duration)
+  denoise           FFT-based audio noise reduction (afftdn) for audio + video tracks
+  subtitle-burn     Hardcode SRT/VTT subtitles into a video (font-size / colour / outline)
+  watermark         Overlay an image onto a video or still (corner / margin / opacity / scale)
+  color-lut         Apply a 3D LUT (.cube file) to image / video (intensity blend 0..1)
   transform         Generic dispatch for any registered transform (escape hatch)
 
 Infrastructure:
@@ -116,6 +120,14 @@ func run() error {
 		return cmdSugar("extract-audio", args)
 	case "silence-remove":
 		return cmdSugar("silence-remove", args)
+	case "denoise":
+		return cmdSugar("denoise", args)
+	case "subtitle-burn":
+		return cmdSugar("subtitle-burn", args)
+	case "watermark":
+		return cmdSugar("watermark", args)
+	case "color-lut":
+		return cmdSugar("color-lut", args)
 	case "transform":
 		return cmdTransform(args)
 
@@ -822,6 +834,23 @@ func cmdSugar(verb string, args []string) error {
 		// silence-remove
 		thresholdDB   *float64
 		minSilenceSec *float64
+		// denoise
+		noiseFloorDB   *float64
+		noiseReduction *float64
+		// subtitle-burn
+		subtitlePath *string
+		fontSize     *int
+		fontColor    *string
+		outline      *int
+		// watermark
+		overlayPath *string
+		position    *string
+		margin      *int
+		opacity     *float64
+		scaleFrac   *float64
+		// color-lut
+		lutPath   *string
+		intensity *float64
 	)
 	switch verb {
 	case "compress":
@@ -854,6 +883,27 @@ func cmdSugar(verb string, args []string) error {
 		thresholdDB = fs.Float64("threshold-db", 0, "Silence cutoff in dBFS (default -50; quieter studios use -60)")
 		minSilenceSec = fs.Float64("min-silence-sec", 0, "Minimum gap duration to remove, seconds (default 0.5)")
 		fmtFlag = fs.String("format", "", "Output container format")
+	case "denoise":
+		noiseFloorDB = fs.Float64("noise-floor-db", 0, "Noise floor estimate in dBFS (default -25)")
+		noiseReduction = fs.Float64("noise-reduction", 0, "Suppression amount in dB 0.01-97 (default 12)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "subtitle-burn":
+		subtitlePath = fs.String("subtitle", "", "Subtitle file path — SRT or VTT (required)")
+		fontSize = fs.Int("font-size", 0, "Render size in pixels (default 28)")
+		fontColor = fs.String("font-color", "", "Hex RRGGBB (default ffffff)")
+		outline = fs.Int("outline", -1, "Outline width in pixels (default 2)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "watermark":
+		overlayPath = fs.String("overlay", "", "Overlay image path — PNG/JPG/WebP (required)")
+		position = fs.String("position", "", "top-left | top-right | bottom-left | bottom-right (default) | center")
+		margin = fs.Int("margin", -1, "Pixels from the chosen edge (default 16)")
+		opacity = fs.Float64("opacity", -1, "0.0-1.0 (default 0.85)")
+		scaleFrac = fs.Float64("scale", 0, "Overlay width as a fraction of input width (default 0.2)")
+		fmtFlag = fs.String("format", "", "Output container format")
+	case "color-lut":
+		lutPath = fs.String("lut", "", "LUT .cube file path (required)")
+		intensity = fs.Float64("intensity", -1, "Blend factor 0.0-1.0 (default 1.0)")
+		fmtFlag = fs.String("format", "", "Output container format")
 	}
 
 	fs.Usage = func() {
@@ -884,6 +934,18 @@ func cmdSugar(verb string, args []string) error {
 		case "silence-remove":
 			fmt.Fprintln(fs.Output(),
 				"Strip silent gaps from video / audio. Tunable threshold + min duration.")
+		case "denoise":
+			fmt.Fprintln(fs.Output(),
+				"FFT-based audio noise reduction. Audio or audio-track-of-video.")
+		case "subtitle-burn":
+			fmt.Fprintln(fs.Output(),
+				"Hardcode SRT/VTT subtitles into a video. --subtitle is required.")
+		case "watermark":
+			fmt.Fprintln(fs.Output(),
+				"Overlay an image onto a video or still. --overlay is required.")
+		case "color-lut":
+			fmt.Fprintln(fs.Output(),
+				"Apply a 3D LUT (.cube) to image / video. --lut is required.")
 		}
 		fmt.Fprintln(fs.Output())
 		fmt.Fprintln(fs.Output(), "Flags:")
@@ -981,6 +1043,74 @@ func cmdSugar(verb string, args []string) error {
 		if *fmtFlag != "" {
 			params["format"] = *fmtFlag
 		}
+	case "denoise":
+		if *noiseFloorDB != 0 {
+			params["noise_floor_db"] = *noiseFloorDB
+		}
+		if *noiseReduction != 0 {
+			params["noise_reduction"] = *noiseReduction
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "subtitle-burn":
+		if *subtitlePath == "" {
+			return fmt.Errorf("subtitle-burn: --subtitle is required (path to an SRT or VTT)")
+		}
+		if *fontSize > 0 {
+			params["font_size"] = *fontSize
+		}
+		if *fontColor != "" {
+			params["font_color"] = *fontColor
+		}
+		if *outline >= 0 {
+			params["outline"] = *outline
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "watermark":
+		if *overlayPath == "" {
+			return fmt.Errorf("watermark: --overlay is required (path to an overlay image)")
+		}
+		if *position != "" {
+			params["position"] = *position
+		}
+		if *margin >= 0 {
+			params["margin"] = *margin
+		}
+		if *opacity >= 0 {
+			params["opacity"] = *opacity
+		}
+		if *scaleFrac > 0 {
+			params["scale"] = *scaleFrac
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	case "color-lut":
+		if *lutPath == "" {
+			return fmt.Errorf("color-lut: --lut is required (path to a .cube file)")
+		}
+		if *intensity >= 0 {
+			params["intensity"] = *intensity
+		}
+		if *fmtFlag != "" {
+			params["format"] = *fmtFlag
+		}
+	}
+
+	// Per-verb auxiliary input paths. The transform.Run helper
+	// passes each one through to ffmpeg-serve as a `--aux` flag,
+	// where the daemon reads the bytes + populates Request.Aux.
+	var aux []string
+	switch verb {
+	case "subtitle-burn":
+		aux = append(aux, *subtitlePath)
+	case "watermark":
+		aux = append(aux, *overlayPath)
+	case "color-lut":
+		aux = append(aux, *lutPath)
 	}
 
 	return transform.Run(context.Background(), transform.Options{
@@ -988,6 +1118,7 @@ func cmdSugar(verb string, args []string) error {
 		Input:      in,
 		Output:     first(*output, *outShort),
 		Params:     params,
+		Aux:        aux,
 		RuntimeBin: *runtimeBin,
 	})
 }
